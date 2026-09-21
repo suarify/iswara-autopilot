@@ -1280,7 +1280,11 @@ async function decide() {
     nextDecision = started + decisionInterval(state);
   } catch (error) {
     if (token === generation) {
-      sim.player.target = 0;
+      // Expired/stale decisions brake to a stop — unless escaping, in
+      // which case the local reflex holds survival speed instead.
+      sim.player.target = sim.escapeMode()
+        ? Math.min(sim.speedEnvelope(sim.player).max, 22)
+        : 0;
       scene.vectors.clear();
       errors++;
       if (error.message.includes("expired")) lastExpireAt = performance.now();

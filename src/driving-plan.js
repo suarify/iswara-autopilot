@@ -184,6 +184,7 @@ export function createDrivingPlan(
     crossing.stopS - near.s < 100;
   const requiresStop =
     !recovering &&
+    !car.escapeMode &&
     approachingControl &&
     control &&
     control.distance >= -0.7 &&
@@ -208,6 +209,7 @@ export function createDrivingPlan(
       );
   const queue =
     lead &&
+    !car.escapeMode &&
     crossing &&
     ["stop", "signal"].includes(world.byId[crossing.nodeId].control) &&
     crossing.stopS - near.s > -3 &&

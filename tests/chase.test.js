@@ -226,3 +226,21 @@ test("escape mode ignores queues but keeps collision caps", () => {
   assert.equal(sim.player.escapeMode, true);
   void full;
 });
+
+test("escape reflex floors speed without waiting for Jev", () => {
+  const sim = new Simulation(7, "town", { chase: true });
+  for (const v of sim.chasePack()) {
+    v.x = sim.player.x;
+    v.z = sim.player.z - 12;
+  }
+  sim.player.speed = 10;
+  sim.player.target = 0;
+  sim.player.maneuver = null;
+  sim.autopilot = true;
+  sim.step(0.05);
+  assert(
+    sim.player.appliedTarget >= 20,
+    `reflex should floor survival speed, got ${sim.player.appliedTarget}`,
+  );
+  assert(sim.player.speed > 10, "car should actually accelerate");
+});

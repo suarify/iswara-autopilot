@@ -910,6 +910,12 @@ export class Simulation {
     // Spoken commands nudge on top of Jev/manual behavior, then the
     // usual safety caps still apply.
     if (voice.boost) target = Math.max(0, target + voice.boost);
+    // Escape reflex: survival doesn't wait for Jev. Floor the speed
+    // locally; Jev keeps steering. Collision/curve caps still bind.
+    const escapeFloor =
+      this.autopilot && this.escapeMode()
+        ? Math.min(this.speedEnvelope(v).max, 22)
+        : 0;
     if (this.autopilot && this.safety) {
       if (this.lastPlan?.recovery.active) {
         target = clamp(target, -2, 2);
@@ -932,6 +938,10 @@ export class Simulation {
       }
     }
     if (this.complete) target = 0;
+    else if (escapeFloor > target) {
+      target = escapeFloor;
+      this.brakeReason = null;
+    }
     v.appliedTarget = target;
     if (this.autopilot || this.complete) {
       const steering =
