@@ -107,6 +107,57 @@ test("local decisions need a personal Jev key, not login credentials", async (t)
   assert.match((await response.json()).error, /TYPESAFE_API_KEY in \.env/);
 });
 
+test("local decisions accept a per-browser key without any server key", async (t) => {
+  const origin = await localServer(t);
+  const clientFetch = globalThis.fetch;
+  let upstreamKey = null;
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    if (url !== "https://api.typesafe.ai/v1/systemone")
+      return clientFetch(url, options);
+    upstreamKey = options.headers.Authorization;
+    return new Response("", { status: 401 });
+  });
+  const response = await clientFetch(`${origin}/api/decide`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: origin,
+      "x-jev-key": "browser-pasted-key",
+    },
+    body: JSON.stringify({ state: new Simulation(42).decisionState() }),
+  });
+  assert.equal(upstreamKey, "Bearer browser-pasted-key");
+  assert.equal(response.status, 401);
+  assert(!JSON.stringify(await response.json()).includes("browser-pasted-key"));
+});
+
+test("key-check probes TypeSafe without echoing the key", async (t) => {
+  const origin = await localServer(t);
+  const clientFetch = globalThis.fetch;
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    if (url !== "https://api.typesafe.ai/v1/systemone")
+      return clientFetch(url, options);
+    assert.equal(options.headers.Authorization, "Bearer probe-key");
+    return new Response("", { status: 401 });
+  });
+  const probe = (key) =>
+    clientFetch(`${origin}/api/key-check`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: origin,
+        ...(key ? { "x-jev-key": key } : {}),
+      },
+      body: "{}",
+    }).then((r) => r.json());
+  assert.deepEqual(await probe("probe-key"), {
+    ok: false,
+    error:
+      "TypeSafe rejected this key (401). Check for typos or grab a fresh one.",
+  });
+  assert.deepEqual(await probe(null), { ok: false, error: "No key provided." });
+});
+
 test("local requests reach Jev without a session and preserve rejected-key errors", async (t) => {
   const origin = await localServer(t, { TYPESAFE_API_KEY: "local-test-key" });
   const clientFetch = globalThis.fetch;

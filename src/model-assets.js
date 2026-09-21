@@ -6,15 +6,19 @@ import { materials, physical } from "./materials.js";
 import { steeringCurvature } from "./planning.js";
 import { assetManager } from "./asset-loading.js";
 
-let carAsset;
+// Hero GLB cache lives in heroAssets (keyed by HERO_MODELS id) below.
 const WHEEL_NAMES = ["wheel_fl", "wheel_fr", "wheel_rl", "wheel_rr"];
 
 export function updateHeroWheels(model, signedDistance, steering, speed) {
   const wheelbase = model.userData.wheelbase;
+  if (!wheelbase) return;
   const curvature = steeringCurvature(steering, speed);
   for (const name of WHEEL_NAMES) {
     const wheel = model.getObjectByName(name);
+    if (!wheel) continue;
     const rotor = wheel.children[0];
+    if (!rotor) continue;
+    if (!wheel.userData.radius) continue;
     // Local -Z is forward. Calipers steer with the axle but do not roll.
     rotor.rotation.x =
       (rotor.rotation.x - signedDistance / wheel.userData.radius) %
@@ -25,12 +29,101 @@ export function updateHeroWheels(model, signedDistance, steering, speed) {
   }
 }
 
-export async function loadHeroCar() {
-  carAsset ||= (async () => {
-    const decoder = new DRACOLoader(assetManager).setDecoderPath("/draco/");
-    const loader = new GLTFLoader(assetManager).setDRACOLoader(decoder);
-    const { scene } = await loader.loadAsync("/models/model-y/model-y.glb");
-    decoder.dispose();
+// Set to Math.PI if your replacement GLB faces +Z (appears to drive backwards).
+const HERO_FLIP_YAW = Math.PI;
+
+// Generic path: use any GLB even when it doesn't match the Model Y
+// material/wheel layout. Moves the original meshes untouched (keeps
+// materials, textures, skinning) into a normalized wrapper: length on -Z,
+// ~4.75 m long, centered, grounded at y=0.
+function normalizeModel(source, flipYaw, name = "hero-car-generic", sizeScale = 1) {
+  const model = new THREE.Group();
+  const inner = new THREE.Group();
+  inner.add(...source.children);
+  if (inner.children.length === 0) throw new Error(`${name}: GLB has no meshes`);
+  inner.rotation.y = flipYaw;
+  model.add(inner);
+  inner.updateMatrixWorld(true);
+  let bounds = new THREE.Box3().setFromObject(inner);
+  let size = bounds.getSize(new THREE.Vector3());
+  // Most car exports have length as the longest horizontal axis. The sim
+  // expects length on -Z, so yaw 90° when length arrives on X (Model Y source).
+  if (size.x > size.z * 1.15) {
+    inner.rotation.y += -Math.PI / 2;
+    inner.updateMatrixWorld(true);
+    bounds = new THREE.Box3().setFromObject(inner);
+    size = bounds.getSize(new THREE.Vector3());
+  }
+  const center = bounds.getCenter(new THREE.Vector3());
+  const scale = (4.75 / Math.max(size.z, 0.001)) * sizeScale;
+  inner.position.set(-center.x, -bounds.min.y, -center.z);
+  model.scale.setScalar(scale);
+  model.traverse((mesh) => {
+    if (!mesh.isMesh) return;
+    mesh.castShadow = mesh.receiveShadow = true;
+  });
+  const scaledHeight = size.y * scale;
+  model.name = name;
+  model.userData.eyeHeight = THREE.MathUtils.clamp(scaledHeight * 0.68, 1.1, 1.35);
+  model.userData.eyeForward = 0.45;
+  model.userData.wheelbase = 4.75 * 0.6;
+  model.userData.genericModel = true;
+  return model;
+}
+
+function buildGenericHeroModel(scene) {
+  return normalizeModel(scene, HERO_FLIP_YAW);
+}
+
+// Traffic fleet. tesla.glb is the original rigged Model Y asset (faces -X,
+// so no flip); wira/myvi/tank are single-mesh exports from the same pipeline
+// as the custom model-y.glb (face +X, need the PI flip).
+export const TRAFFIC_MODELS = {
+  tesla: { file: "/models/model-y/tesla.glb", flip: 0 },
+  wira: { file: "/models/model-y/wira.glb", flip: Math.PI },
+  myvi: { file: "/models/model-y/myvi.glb", flip: Math.PI },
+  tank: { file: "/models/model-y/tank.glb", flip: Math.PI },
+};
+const trafficAssets = new Map();
+
+export async function loadTrafficCar(name) {
+  const spec = TRAFFIC_MODELS[name];
+  if (!spec) throw new Error(`Unknown traffic model: ${name}`);
+  if (!trafficAssets.has(name)) {
+    trafficAssets.set(
+      name,
+      (async () => {
+        const decoder = new DRACOLoader(assetManager).setDecoderPath("/draco/");
+        const loader = new GLTFLoader(assetManager).setDRACOLoader(decoder);
+        try {
+          const { scene } = await loader.loadAsync(spec.file);
+          return normalizeModel(scene, spec.flip, `traffic-${name}`);
+        } finally {
+          decoder.dispose();
+        }
+      })(),
+    );
+  }
+  const template = await trafficAssets.get(name);
+  const model = template.clone(true);
+  model.traverse((mesh) => {
+    if (mesh.isMesh) mesh.geometry = mesh.geometry.clone();
+  });
+  return model;
+}
+
+export const HERO_MODELS = [
+  { id: "tesla", label: "Tesla", file: "/models/model-y/tesla.glb", flip: 0, rigged: true },
+  { id: "stripe-myvi", label: "Myvi Stripy", file: "/models/model-y/model-y.glb", flip: 0, size: 0.75 },
+  { id: "wira", label: "Wira", file: "/models/model-y/wira.glb", flip: Math.PI },
+  { id: "tank", label: "Tank", file: "/models/model-y/tank.glb", flip: Math.PI },
+  { id: "red-myvi", label: "Myvi Red", file: "/models/model-y/myvi.glb", flip: Math.PI },
+];
+
+// Rigged builder for the original Model Y / Tesla asset. Throws when the
+// source lacks the expected tire/material layout; callers fall back to
+// normalizeModel so any GLB still shows up.
+function buildRiggedModel(scene) {
     const paint = physical("model-y-paint", {
       color: "#e1e4e8",
       metalness: 0.35,
@@ -128,6 +221,7 @@ export async function loadHeroCar() {
       const wheelName = `wheel_${center.z < 0 ? "f" : "r"}${center.x < 0 ? "l" : "r"}`;
       const candidate = wheels.get(wheelName);
       const atAxle =
+        candidate &&
         Math.abs(center.z - candidate.pivot.position.z) < 0.3 &&
         Math.abs(center.x - candidate.pivot.position.x) < 0.25 &&
         box.max.y < 0.8 &&
@@ -202,11 +296,44 @@ export async function loadHeroCar() {
         wheels.get("wheel_rl").pivot.position.z,
     );
     return model;
-  })();
-  const template = await carAsset,
-    model = template.clone(true);
+}
+
+function cloneModel(template) {
+  const model = template.clone(true);
   model.traverse((mesh) => {
     if (mesh.isMesh) mesh.geometry = mesh.geometry.clone();
   });
   return model;
+}
+
+async function loadHeroModel(spec) {
+  const decoder = new DRACOLoader(assetManager).setDecoderPath("/draco/");
+  const loader = new GLTFLoader(assetManager).setDRACOLoader(decoder);
+  try {
+    const { scene } = await loader.loadAsync(spec.file);
+    if (spec.rigged) {
+      try {
+        return buildRiggedModel(scene);
+      } catch (error) {
+        console.warn(
+          "Hero car rig unavailable, using generic model instead of fallback",
+          error,
+        );
+      }
+    }
+    return normalizeModel(scene, spec.flip, `hero-${spec.id}`, spec.size ?? 1);
+  } finally {
+    decoder.dispose();
+  }
+}
+
+const heroAssets = new Map();
+
+export async function loadHeroCar(id = "stripe-myvi") {
+  const spec =
+    HERO_MODELS.find((m) => m.id === id) ??
+    HERO_MODELS.find((m) => m.id === "stripe-myvi");
+  if (!heroAssets.has(spec.id))
+    heroAssets.set(spec.id, loadHeroModel(spec));
+  return cloneModel(await heroAssets.get(spec.id));
 }

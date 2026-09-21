@@ -60,7 +60,7 @@ export function validState(state) {
 export function questions(state) {
   return prepareJevRequest(state).request.questions;
 }
-export async function evaluate(state, env, signal, onUsage) {
+export async function evaluate(state, env, signal, onUsage, apiKey) {
   if (!validState(state)) {
     const error = new Error(
       "A valid driving observation and candidate batch are required.",
@@ -68,6 +68,10 @@ export async function evaluate(state, env, signal, onUsage) {
     error.status = 400;
     throw error;
   }
+  // A key pasted into the frontend (x-jev-key header) wins for this call;
+  // otherwise the server-wide TYPESAFE_API_KEY applies. The key is only
+  // ever forwarded to api.typesafe.ai, never logged or echoed back.
+  const key = apiKey || env.TYPESAFE_API_KEY;
   const start = performance.now();
   const prepared = prepareJevRequest(state);
   const requestQuestions = prepared.request.questions;
@@ -75,10 +79,17 @@ export async function evaluate(state, env, signal, onUsage) {
   const apiCall = Object.keys(requestQuestions).length > 0;
   let data = { answers: {}, usage: { input_tokens: 0, output_tokens: 0 } };
   if (apiCall) {
+    if (!key) {
+      const error = new Error(
+        "No Jev API key. Enter one in the frontend or set TYPESAFE_API_KEY in .env.",
+      );
+      error.status = 503;
+      throw error;
+    }
     const res = await fetch("https://api.typesafe.ai/v1/systemone", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${env.TYPESAFE_API_KEY}`,
+        Authorization: `Bearer ${key}`,
         "Content-Type": "application/json",
       },
       body,
@@ -87,7 +98,7 @@ export async function evaluate(state, env, signal, onUsage) {
     if (!res.ok) {
       const error = new Error(
         res.status === 401
-          ? "Jev rejected the API key. Update TYPESAFE_API_KEY in .env."
+          ? "Jev rejected the API key — please check your key."
           : res.status === 429
             ? "Jev rate limit reached. Pausing before retry."
             : `Jev API returned HTTP ${res.status}.`,
@@ -174,18 +185,60 @@ export function jevMiddleware(env) {
           output_per_million: Number(env.JEV_OUTPUT_PRICE ?? 0),
         },
       });
-    if (path !== "/api/decide" || req.method !== "POST")
+    if (path !== "/api/decide" && path !== "/api/key-check")
       return send(404, { error: "Not found" });
-    if (!env.TYPESAFE_API_KEY)
-      return send(503, {
-        error: "Set TYPESAFE_API_KEY in .env and restart the server.",
-      });
+    if (req.method !== "POST") return send(404, { error: "Not found" });
+    // Local dev accepts a per-browser key via the x-jev-key header so no
+    // .env edit is needed; it falls back to the server-wide key.
+    const headerKey = req.headers["x-jev-key"];
+    const clientKey =
+      typeof headerKey === "string" && headerKey.length <= 200
+        ? headerKey.trim() || null
+        : null;
     if (
       req.headers.origin &&
       req.headers.origin !== `http://${req.headers.host}` &&
       req.headers.origin !== `https://${req.headers.host}`
     )
       return send(403, { error: "Origin not allowed" });
+    if (path === "/api/key-check") {
+      // Cheap auth probe: an empty payload is rejected for its shape (400)
+      // when the key is fine, and with 401 only when the key is bad.
+      // Never echoes the key back.
+      const key = clientKey || env.TYPESAFE_API_KEY;
+      if (!key)
+        return send(200, { ok: false, error: "No key provided." });
+      try {
+        const probe = await fetch("https://api.typesafe.ai/v1/systemone", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${key}`,
+            "Content-Type": "application/json",
+          },
+          body: "{}",
+          signal: AbortSignal.timeout(10000),
+        });
+        if (probe.status === 401)
+          return send(200, {
+            ok: false,
+            error: "TypeSafe rejected this key (401). Check for typos or grab a fresh one.",
+          });
+        return send(200, { ok: true });
+      } catch (e) {
+        return send(200, {
+          ok: false,
+          error:
+            e.name === "TimeoutError"
+              ? "TypeSafe timed out — try again."
+              : "Could not reach TypeSafe.",
+        });
+      }
+    }
+    if (!env.TYPESAFE_API_KEY && !clientKey)
+      return send(503, {
+        error:
+          "No Jev API key. Tap the key button and paste yours, or set TYPESAFE_API_KEY in .env and restart.",
+      });
     if (active >= 3)
       return send(429, { error: "Too many active Jev requests." });
     active++;
@@ -204,7 +257,7 @@ export function jevMiddleware(env) {
           error:
             "A valid driving observation and candidate batch are required.",
         });
-      const result = await evaluate(state, env);
+      const result = await evaluate(state, env, undefined, undefined, clientKey);
       send(200, result);
     } catch (e) {
       send(e.status || 502, {

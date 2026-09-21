@@ -25,6 +25,7 @@ import {
   Grip,
   Github,
   LogOut,
+  Key,
 } from "lucide";
 import { Simulation } from "./simulation.js";
 import { BackgroundPlanner } from "./background-planner.js";
@@ -67,6 +68,7 @@ const icons = {
   Grip,
   Github,
   LogOut,
+  Key,
 };
 const icon = (name) => `<i data-lucide="${name}"></i>`,
   $ = (id) => document.getElementById(id);
@@ -77,6 +79,9 @@ const params = new URLSearchParams(location.search),
 const sim = new Simulation(
   Number(params.get("seed")) || Math.floor(Math.random() * 999999),
   THEMES[type] ? type : "city",
+  // A Myvi starts behind the player and hunts it; Jev is told to escape.
+  // Disable with ?chase=0.
+  { chase: params.get("chase") !== "0" },
 );
 let playCredits = null,
   loading = true,
@@ -98,7 +103,8 @@ let configured = false,
   uiTime = 0,
   lastNow = performance.now(),
   toastTimer,
-  crashHandled = false;
+  crashHandled = false,
+  chaseToast = "";
 const keys = new Set(),
   tally = {
     cost: 0,
@@ -117,9 +123,10 @@ $("app").innerHTML = `
 <div id="minimap" class="minimap glass"><div class="minimap-toolbar" role="toolbar" aria-label="Minimap controls"><button id="map-drag" aria-label="Move minimap" title="Move minimap · drag or use arrow keys">${icon("grip")}</button><div><button id="map-zoom-out" aria-label="Zoom out" title="Zoom out">${icon("minus")}</button><button id="map-zoom-in" aria-label="Zoom in" title="Zoom in">${icon("plus")}</button><button id="map-reset" aria-label="Reset minimap" title="Reset map position, zoom and following">${icon("rotate-ccw")}</button></div></div><canvas id="map-canvas" width="380" height="310" aria-label="Route map. Drag to pan, scroll to zoom, double-click to follow the car."></canvas></div></div>
 <div id="paused-overlay" hidden><div class="glass"><span>${icon("pause")} Paused</span><button id="resume" class="primary">Resume driving</button></div></div>
 <div id="arrival" class="arrival glass" hidden><span class="arrival-mark">${icon("flag")}</span><span class="eyebrow">DESTINATION REACHED</span><h1>You made it.</h1><p id="arrival-summary"></p><button id="next-trip" class="primary">Next drive ${icon("arrow-up-right")}</button><button id="keep-driving" class="subtle">Keep exploring</button></div>
-<div class="bottom-hud"><div class="driver-dock glass"><div class="speed-cluster"><div title="Current speed"><strong id="speed">0</strong><span>km/h</span></div><span class="speed-limit" title="Speed limit"><small>LIMIT</small><b id="speed-limit">50</b></span></div><span class="dock-divider"></span><div class="pilot-actions"><button id="autopilot" class="pilot-button" role="switch" aria-checked="false" aria-label="Jev autopilot" title="Engage Jev · J">${icon("sparkles")}<span id="pilot-label">Engage Jev</span><kbd>J</kbd></button><button id="candidates-toggle" class="candidate-button" aria-label="Show steering candidates" aria-pressed="false" title="Show steering candidates"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 20V3m-3 3 3-3 3 3M12 20C12 14 7 12 3 8m0 3V8h3M12 20c0-6 5-8 9-12m-3 0h3v3"/><circle cx="12" cy="21" r="1" fill="currentColor" stroke="none"/></svg></button></div><div id="decision-status"><span id="pilot-state">Free play</span><span id="context-message">WASD to drive · Space to brake</span><span class="cost-total" title="Estimated cost from Jev-reported token usage and configured pricing."><span id="cost-label">Session</span> <strong id="cost">$0.000000</strong></span></div><span class="dock-divider"></span><div class="dock-tools" role="group" aria-label="View and driving controls"><button id="camera" title="Change camera · C" aria-label="Change camera">${icon("video")}<span id="camera-name">Chase</span></button><button id="scene-json" aria-label="Inspect live JSON" title="Inspect live JSON">${icon("braces")}</button><button id="fullscreen" aria-label="Enter fullscreen" title="Fullscreen">${icon("maximize")}</button><span class="divider"></span><button id="pause" aria-label="Pause simulation" title="Pause · P">${icon("pause")}</button><button id="sign-out" hidden aria-label="Sign out" title="Sign out">${icon("log-out")}</button></div></div></div>
+<div class="bottom-hud"><div class="driver-dock glass"><div class="speed-cluster"><div title="Current speed"><strong id="speed">0</strong><span>km/h</span></div><span class="speed-limit" title="Speed limit"><small>LIMIT</small><b id="speed-limit">50</b></span></div><span class="dock-divider"></span><div class="pilot-actions"><button id="autopilot" class="pilot-button" role="switch" aria-checked="false" aria-label="Jev autopilot" title="Engage Jev · J">${icon("sparkles")}<span id="pilot-label">Engage Jev</span><kbd>J</kbd></button><button id="candidates-toggle" class="candidate-button" aria-label="Show steering candidates" aria-pressed="false" title="Show steering candidates"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 20V3m-3 3 3-3 3 3M12 20C12 14 7 12 3 8m0 3V8h3M12 20c0-6 5-8 9-12m-3 0h3v3"/><circle cx="12" cy="21" r="1" fill="currentColor" stroke="none"/></svg></button></div><div id="decision-status"><span id="pilot-state">Free play</span><span id="context-message">WASD to drive · Space to brake</span><span class="cost-total" title="Estimated cost from Jev-reported token usage and configured pricing."><span id="cost-label">Session</span> <strong id="cost">$0.000000</strong></span></div><span class="dock-divider"></span><div class="dock-tools" role="group" aria-label="View and driving controls"><button id="camera" title="Change camera · C" aria-label="Change camera">${icon("video")}<span id="camera-name">Chase</span></button><button id="scene-json" aria-label="Inspect live JSON" title="Inspect live JSON">${icon("braces")}</button><button id="fullscreen" aria-label="Enter fullscreen" title="Fullscreen">${icon("maximize")}</button><span class="divider"></span><button id="jev-key" aria-label="Jev API key" title="Add your Jev key">${icon("key")}</button><button id="pause" aria-label="Pause simulation" title="Pause · P">${icon("pause")}</button><button id="sign-out" hidden aria-label="Sign out" title="Sign out">${icon("log-out")}</button></div></div></div>
 <dialog id="crash-dialog" aria-labelledby="crash-title" aria-describedby="crash-description"><span class="crash-symbol">${icon("x")}</span><span class="eyebrow">DRIVE ENDED</span><h1 id="crash-title">Game over.</h1><p id="crash-description"></p><div class="crash-stats"><div><strong id="crash-speed"></strong><span>km/h at impact</span></div><div><strong id="crash-distance"></strong><span>meters driven</span></div></div><button id="retry-drive" class="primary">${icon("rotate-ccw")} Restart drive</button><button id="crash-new-world" class="secondary">Try a new world ${icon("arrow-up-right")}</button></dialog>
 <dialog id="credit-dialog" aria-labelledby="credit-title"><span class="eyebrow">THANKS FOR TAKING A DRIVE</span><h2 id="credit-title">That's your free lap.</h2><p>Your $0.25 of Jev play credit has been used. You can keep exploring with manual controls.</p><button id="credit-close" class="primary">Keep driving manually</button><a href="https://standardagents.ai/" target="_blank" rel="noopener noreferrer">Explore Standard Agents ↗</a></dialog>
+<dialog id="key-dialog" aria-labelledby="key-title"><span class="eyebrow">JEV AUTOPILOT KEY</span><h2 id="key-title">Use your own Jev key.</h2><p>Paste a <a href="https://typesafe.ai/" target="_blank" rel="noopener noreferrer">TypeSafe AI</a> key to engage autopilot. It stays in this browser and is only sent to this server with drive requests — never displayed or logged.</p><input id="jev-key-input" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your TypeSafe AI key" aria-label="TypeSafe AI key" /><p id="jev-key-status" class="key-status" aria-live="polite"></p><div class="dialog-actions"><button id="key-save" class="primary">Save key</button><button id="key-test" class="secondary">Test</button><button id="key-clear" class="subtle">Remove</button><button id="key-close" class="subtle">Close</button></div></dialog>
 <div id="toast" role="status" hidden></div>
 <dialog id="json-dialog"><div class="json-header"><div>${icon("braces")}<strong>Under the hood</strong><span id="json-live">LIVE · 4 Hz</span></div><button id="close-json" aria-label="Close JSON inspector">${icon("x")}</button></div><div class="json-toolbar"><div class="json-tabs"><button data-tab="request" class="active">Jev input</button><button data-tab="sensor">Perception</button><button data-tab="world">Full world</button><button data-tab="decision">Response</button></div><div class="json-actions"><button id="freeze-json">Freeze</button><button id="copy-json" aria-label="Copy displayed JSON">${icon("copy")} <span id="copy-json-label" aria-live="polite">Copy</span></button><button id="download-json">${icon("download")} Download</button></div></div><p id="json-description">Exact Jev API payload, including instructions and offered choices. Full geometry and control details stay local.</p><pre id="json-content"></pre></dialog>
 <dialog id="help-dialog"><button id="close-help" class="dialog-close" aria-label="Close help">${icon("x")}</button><span class="eyebrow">YOUR NEXT DRIVE</span><h2>Take the wheel.</h2><p class="touch-help">Use the thumbstick to steer. Push up to accelerate, pull down to brake and reverse. Release to coast; hold Brake to stop.</p><div class="help-keys"><span><kbd>W / ↑</kbd> Hold accelerator</span><span><kbd>S / ↓</kbd> Brake / reverse</span><span><kbd>A / D</kbd> Steer</span><span><kbd>SPACE</kbd> Brake</span><span><kbd>J</kbd> Jev autopilot</span><span><kbd>C</kbd> Camera</span><span><kbd>P</kbd> Pause</span><span><kbd>?</kbd> Keyboard help</span></div><p>Drag the scene to orbit in Chase or Bird’s eye; drag to look around in Driver view. Scroll to zoom outside; double-click to recenter. Tap A/D for small corrections; hold for a sharper turn and release to recenter. Hold W to accelerate; release to coast with drag. S brakes, then reverses once stopped. Space applies the brake. Autopilot sets target speed directly.</p><p>The bright blue line is Jev's selected three-second plan. Use Candidates to see the sampled paths: forward in blue/cyan, reverse in purple, lane departures in amber, and predicted collisions in orange. Choice probabilities are available in the JSON inspector. The safety brake can reduce speed for a missed hazard; interventions are shown beside the autopilot button.</p><p class="asset-credits">Vehicle: <a href="https://sketchfab.com/3d-models/tesla-model-y-2021-c0a86cac582d4b33aba0fb1b1912d970" target="_blank" rel="noreferrer">Tesla Model Y 2021</a> by 763468712, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer">CC BY 4.0</a>. Geometry adapted by Tina 3D Tesla; optimized, re-materialed, and wheel-rigged for JevPilot. Tree, shrub, streetlight, surface textures and sky: <a href="https://polyhaven.com" target="_blank" rel="noreferrer">Poly Haven</a>, CC0.</p><p>Driving keys take back control. Use the JSON button for live inputs, full world state, probabilities, and session telemetry.</p></dialog>`;
@@ -248,6 +255,42 @@ function toast(text, type = "info") {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => ($("toast").hidden = true), 4200);
 }
+// Personal Jev key stored only in this browser (localStorage). It is sent
+// to our own server as the x-jev-key header so local dev needs no .env
+// edit; it is never written into JSON views, costs, or logs.
+const JEV_KEY_STORAGE = "jevpilot.jev_api_key";
+const getJevKey = () => {
+  try {
+    return (localStorage.getItem(JEV_KEY_STORAGE) || "").trim() || null;
+  } catch {
+    return null;
+  }
+};
+const hasJevKey = () => !!getJevKey();
+function refreshKeyButton() {
+  const key = getJevKey(),
+    button = $("jev-key");
+  if (!button) return;
+  button.hidden = authRequired;
+  tooltips.set(
+    button,
+    key ? `Jev key ····${key.slice(-4)} · tap to change` : "Add your Jev key",
+  );
+  button.classList.toggle("key-missing", !key);
+}
+function openKeyDialog() {
+  const key = getJevKey();
+  $("jev-key-input").value = "";
+  $("jev-key-input").placeholder = key
+    ? `Saved ····${key.slice(-4)} — paste a new key to replace`
+    : "Paste your TypeSafe AI key";
+  $("jev-key-status").textContent = key
+    ? `Key saved in this browser (····${key.slice(-4)}).`
+    : "No key saved yet.";
+  $("key-clear").hidden = !key;
+  $("key-dialog").showModal();
+  setTimeout(() => $("jev-key-input").focus(), 50);
+}
 function refreshWorld() {
   const w = sim.world;
   $("world-select").value = w.type;
@@ -271,8 +314,9 @@ function setPilot(on) {
     $("credit-dialog").showModal();
     return;
   }
-  if (on && !configured) {
-    toast("Jev is not connected. Check the API key on the server.", "error");
+  if (on && !configured && !hasJevKey()) {
+    toast("Add your Jev key to engage autopilot.", "error");
+    openKeyDialog();
     return;
   }
   if (sim.crash || (on && sim.complete)) return;
@@ -296,12 +340,13 @@ async function resetWorld(seed = sim.world.seed, type = sim.world.type) {
   showLoading("Building your next drive…");
   generation++;
   crashHandled = false;
+  chaseToast = "";
   $("crash-dialog").close();
   document.body.classList.remove("crashed");
   keys.clear();
   await nextPaint();
   try {
-    sim.reset(seed, type);
+    sim.reset(seed, type, { chase: sim.chaseMode });
     minimap.resetView();
     planner.reset();
     previewError = false;
@@ -526,6 +571,62 @@ function updateCredits(credits) {
   $("cost-label").textContent = "Play credit";
 }
 $("credit-close").onclick = () => $("credit-dialog").close();
+$("jev-key").onclick = () => openKeyDialog();
+$("key-close").onclick = () => $("key-dialog").close();
+$("key-save").onclick = () => {
+  const value = $("jev-key-input").value.trim();
+  if (!value) {
+    toast("Paste a key first.", "error");
+    return;
+  }
+  try {
+    localStorage.setItem(JEV_KEY_STORAGE, value);
+  } catch {
+    toast("Could not save the key in this browser.", "error");
+    return;
+  }
+  $("jev-key-input").value = "";
+  configured = true;
+  refreshKeyButton();
+  $("key-dialog").close();
+  toast("Jev key saved. Press J to engage autopilot.");
+};
+$("key-clear").onclick = () => {
+  try {
+    localStorage.removeItem(JEV_KEY_STORAGE);
+  } catch {
+    /* storage unavailable — key already effectively gone */
+  }
+  refreshKeyButton();
+  openKeyDialog();
+};
+$("key-test").onclick = async () => {
+  // Validate the typed (or saved) key against TypeSafe without driving.
+  const candidate = $("jev-key-input").value.trim() || getJevKey();
+  if (!candidate) {
+    $("jev-key-status").textContent = "Paste a key first, then Test.";
+    return;
+  }
+  $("jev-key-status").textContent = "Checking with TypeSafe…";
+  try {
+    const res = await fetch("/api/key-check", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        "x-jev-key": candidate,
+      },
+      body: "{}",
+      signal: AbortSignal.timeout(15000),
+    });
+    const data = await res.json();
+    $("jev-key-status").textContent = data.ok
+      ? "Key accepted by TypeSafe — save it and press J."
+      : data.error || "Key check failed.";
+  } catch {
+    $("jev-key-status").textContent = "Could not reach the server.";
+  }
+};
 $("sign-out").onclick = async () => {
   setPilot(false);
   sim.paused = true;
@@ -682,7 +783,10 @@ async function decide() {
     const res = await fetch("/api/decide", {
         method: "POST",
         credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(getJevKey() ? { "x-jev-key": getJevKey() } : {}),
+        },
         body: JSON.stringify({ state, request_id: crypto.randomUUID() }),
         signal: AbortSignal.timeout(12000),
       }),
@@ -696,6 +800,18 @@ async function decide() {
     if (res.status === 402 && authRequired) {
       setPilot(false);
       $("credit-dialog").showModal();
+      return;
+    }
+    if (res.status === 503 && !authRequired && !hasJevKey()) {
+      setPilot(false);
+      toast(data.error || "Add your Jev key to drive with autopilot.", "error");
+      openKeyDialog();
+      return;
+    }
+    if (res.status === 401 && !authRequired && hasJevKey()) {
+      setPilot(false);
+      toast("Jev rejected the saved key. Check it and try again.", "error");
+      openKeyDialog();
       return;
     }
     if (!res.ok) throw Error(data.error || "Jev request failed");
@@ -927,6 +1043,30 @@ function updateUI() {
     $("context-message").textContent = sim.lastPlan.road.on_road
       ? "Returning to the route"
       : "Finding a way back onto the road";
+  if (sim.caught) {
+    const by = sim.caught.by ? `the ${sim.caught.by}` : "a chaser";
+    const times = sim.caught.by
+      ? ` (x${sim.chaseStats.caught[sim.caught.by] ?? 1})`
+      : "";
+    $("context-message").textContent = `Tagged by ${by}${times} — chase resumes in 3s`;
+    if (chaseToast !== "caught") {
+      chaseToast = "caught";
+      toast(`The ${sim.caught.by ?? "chaser"} tagged you${times}!`, "error");
+    }
+  } else if (sim.escaped) {
+    $("context-message").textContent =
+      `You escaped the chase pack (#${sim.chaseStats.rounds}) — nicely driven`;
+    if (chaseToast !== "escaped") {
+      chaseToast = "escaped";
+      toast("You escaped the chase pack!");
+    }
+  } else if (sim.activeChaser() && sim.pursuerGap() < 45) {
+    if (chaseToast === "caught") toast("The pack is back on you!");
+    chaseToast = "";
+    const who = sim.activeChaser().label ?? sim.activeChaser().model ?? "chaser";
+    $("context-message").textContent +=
+      ` · Chase #${sim.chaseStats.rounds} · ${who} on your tail — escape!`;
+  } else chaseToast = "";
   $("cost").textContent = playCredits
     ? `$${Math.max(0, playCredits.remaining_usd).toFixed(4)}`
     : `$${tally.cost.toFixed(6)}`;
@@ -1036,9 +1176,13 @@ fetch("/api/status", { credentials: "same-origin" })
     updateCredits(data.credits);
     $("sign-out").hidden = !data.authenticated;
     if (data.user) tooltips.set($("sign-out"), `Sign out · ${data.user.email}`);
-    configured = data.configured;
+    configured = data.configured || (!authRequired && hasJevKey());
+    refreshKeyButton();
     updateCostTooltip(data.pricing);
-    if (!configured)
+    if (!configured && !authRequired) {
+      toast("Add your Jev key (key button) or set it on the server.", "error");
+      openKeyDialog();
+    } else if (!configured)
       toast("Jev API key is missing. Check the server configuration.", "error");
   })
   .catch(() => {

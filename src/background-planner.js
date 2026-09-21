@@ -46,6 +46,8 @@ export class BackgroundPlanner {
       complete: sim.complete,
       autopilot: sim.autopilot,
       routeVersion: sim.routeVersion,
+      caught: sim.caught,
+      escaped: sim.escaped,
       destinationApproach: sim.destinationApproach,
       destinationPoint: sim.destinationPoint,
       offRouteSince: sim.offRouteSince,

@@ -66,25 +66,26 @@ test("Jev chooses a complete maneuver from the submitted random batch", async ()
 
 test("unknown choices, invalid probabilities and API errors cannot produce controls", async () => {
   const sample = new Simulation(42).decisionState(),
-    original = globalThis.fetch;
+    original = globalThis.fetch,
+    env = { TYPESAFE_API_KEY: "test-only-key" };
   try {
     globalThis.fetch = async () => new Response("", { status: 429 });
-    await assert.rejects(() => evaluate(sample, {}), /rate limit/);
+    await assert.rejects(() => evaluate(sample, env), /rate limit/);
     globalThis.fetch = async () =>
       Response.json(response(sample, "old_batch_v0"));
-    await assert.rejects(() => evaluate(sample, {}), /incomplete decision/);
+    await assert.rejects(() => evaluate(sample, env), /incomplete decision/);
     const bad = response(sample);
     delete bad.answers.vector.probabilities[
       Object.keys(candidateChoices(sample))[1]
     ];
     globalThis.fetch = async () => Response.json(bad);
-    await assert.rejects(() => evaluate(sample, {}), /incomplete decision/);
+    await assert.rejects(() => evaluate(sample, env), /incomplete decision/);
     const hit = structuredClone(sample);
     const excluded = Object.keys(candidateChoices(hit))[0];
     hit.vectors[excluded].collision_predicted = true;
     globalThis.fetch = async () => Response.json(response(hit, excluded));
     await assert.rejects(
-      () => evaluate(hit, {}),
+      () => evaluate(hit, env),
       /incomplete decision|predicted collision/,
     );
   } finally {

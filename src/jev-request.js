@@ -89,6 +89,7 @@ export function prepareJevRequest(full) {
   const recovery = full.recovery?.active;
   const nearby = full.scene?.nearby || [];
   const follower = full.traffic?.rear_pressure;
+  const pursuer = full.traffic?.pursuer;
   const lead = full.traffic?.queue || full.scene?.following;
   const hazard = full.scene?.hazard;
   const hasTraffic =
@@ -108,6 +109,9 @@ export function prepareJevRequest(full) {
         : "",
       intersection
         ? "Approach the line; stop 0.5m before it. Green or completed stop: proceed when your path is clear."
+        : "",
+      pursuer && !["escaped", "caught"].includes(pursuer.status)
+        ? "A pursuer is chasing you: escape with faster forward vectors up to the ceiling; do not stop or slow for it."
         : "",
     ]
       .filter(Boolean)
@@ -190,6 +194,15 @@ export function prepareJevRequest(full) {
       id: follower.vehicle_id,
       gap: follower.gap_m,
       closing_speed: follower.closing_speed_mps,
+    };
+  if (pursuer)
+    state.pursuer = {
+      id: pursuer.id,
+      gap: pursuer.gap_m,
+      ...(pursuer.closing_speed_mps != null
+        ? { closing_speed: pursuer.closing_speed_mps }
+        : {}),
+      status: pursuer.status,
     };
   if (lead)
     state.following = {

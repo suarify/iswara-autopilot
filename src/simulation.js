@@ -48,12 +48,48 @@ const REROUTE_DISTANCE_M = 30;
 const REROUTE_DELAY_S = 6;
 const REROUTE_COOLDOWN_S = 30;
 const PLAYER_STOP_DWELL_S = 0.6;
+// How-many-times counter for the chase pack. Persisted in the browser so
+// catches and escapes accumulate across drives (and reloads).
+const CHASE_STATS_KEY = "jevpilot.chase_stats";
+function loadChaseStats() {
+  const fresh = { rounds: 0, caught: {}, escaped: 0 };
+  try {
+    const raw = globalThis.localStorage?.getItem(CHASE_STATS_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (parsed && typeof parsed === "object")
+      return { ...fresh, ...parsed };
+  } catch {
+    // No storage (e.g. planning worker) or corrupt data: count in memory.
+  }
+  return fresh;
+}
+function saveChaseStats(stats) {
+  try {
+    globalThis.localStorage?.setItem(CHASE_STATS_KEY, JSON.stringify(stats));
+  } catch {
+    // Storage unavailable: session counts still work.
+  }
+}
+// Traffic fleet mix. Wira-weighted default so they are easy to spot;
+// override with { fleet: [...] } using names from TRAFFIC_MODELS.
+export const DEFAULT_FLEET = [
+  "wira",
+  "tesla",
+  "wira",
+  "myvi",
+  "wira",
+  "tank",
+];
 
 export class Simulation {
-  constructor(seed = Math.floor(Math.random() * 999999), type = "town") {
-    this.reset(seed, type);
+  constructor(
+    seed = Math.floor(Math.random() * 999999),
+    type = "town",
+    options = {},
+  ) {
+    this.reset(seed, type, options);
   }
-  reset(seed, type) {
+  reset(seed, type, options = {}) {
     this.world = generateWorld(seed, type);
     this.time = 0;
     this.paused = false;
@@ -111,7 +147,19 @@ export class Simulation {
       depth: 4.75,
     };
     this.traffic = [];
+    this.fleet = options.fleet ?? this.fleet ?? [...DEFAULT_FLEET];
     for (let i = 0; i < this.world.theme.traffic; i++) this.spawnTraffic(i);
+    // Preserve chase mode across world resets unless explicitly overridden.
+    this.chaseMode = options.chase ?? this.chaseMode ?? false;
+    this.chaseStats =
+      options.chaseStats ?? this.chaseStats ?? loadChaseStats();
+    this.chasers = [];
+    this.chaser = null;
+    this.caught = null;
+    this.caughtTimer = 0;
+    this.escaped = false;
+    this.escapeTimer = 0;
+    if (this.chaseMode) this.spawnChaser();
     this.pedestrians = [];
     for (
       let i = 0;
@@ -181,9 +229,16 @@ export class Simulation {
       return this.spawnTraffic(i, distant);
     const existing = this.traffic.find((v) => v.id === `vehicle-${i}`);
     if (this.traffic.some((v) => v !== existing && dist(v, p) < 10)) return;
+    const motorcycle = i % 5 === 0;
     const v = {
       id: `vehicle-${i}`,
-      type: i % 5 === 0 ? "motorcycle" : "car",
+      type: motorcycle ? "motorcycle" : "car",
+      // GLB fleet for cars; motorcycles keep the procedural bike mesh.
+      model: motorcycle
+        ? null
+        : this.fleet.length
+          ? this.fleet[i % this.fleet.length]
+          : null,
       x: p.x,
       z: p.z,
       heading: heading(p, next),
@@ -191,8 +246,8 @@ export class Simulation {
       s,
       route,
       stops: {},
-      width: i % 5 === 0 ? 0.8 : 1.9,
-      depth: i % 5 === 0 ? 2.3 : 4.2,
+      width: motorcycle ? 0.8 : 1.9,
+      depth: motorcycle ? 2.3 : 4.2,
       color: choose(this.r, [
         "#de8e69",
         "#e9be57",
@@ -204,6 +259,201 @@ export class Simulation {
     };
     if (existing) Object.assign(existing, v);
     else this.traffic.push(v);
+  }
+  // Chase pack: Myvi, Wira and Tesla start behind the player and hunt it
+  // with direct pursuit. They have no route (route-bound helpers must skip
+  // them); perception and collision-proximity helpers are position-based
+  // and handle them. Tesla is the fastest, Wira the slowest.
+  static CHASE_PACK = [
+    { model: "myvi", label: "Myvi", back_m: 20, side_m: 0, color: "#c02020", extra_mps: 3.5, top_mps: 4 },
+    { model: "wira", label: "Wira", back_m: 27, side_m: 2.5, color: "#2050c0", extra_mps: 3, top_mps: 3 },
+    { model: "tesla", label: "Tesla", back_m: 34, side_m: -2.5, color: "#e1e4e8", extra_mps: 4, top_mps: 5 },
+  ];
+  spawnChaser() {
+    this.chasers = [];
+    this.chaseStats.rounds++;
+    saveChaseStats(this.chaseStats);
+    for (const spec of Simulation.CHASE_PACK) {
+      const behind = move(
+        this.player,
+        angle(this.player.heading + Math.PI),
+        spec.back_m,
+      );
+      const start = move(
+        behind,
+        angle(this.player.heading + Math.PI / 2),
+        spec.side_m,
+      );
+      const chaser = {
+        id: `chaser-${spec.model}`,
+        type: "car",
+        model: spec.model,
+        label: spec.label,
+        x: start.x,
+        z: start.z,
+        heading: this.player.heading,
+        speed: 0,
+        s: NaN,
+        route: null,
+        stops: {},
+        width: 1.9,
+        depth: 4.2,
+        color: spec.color,
+        chaser: true,
+        chaseExtra: spec.extra_mps,
+        chaseTop: spec.top_mps,
+      };
+      this.chasers.push(chaser);
+      this.traffic.push(chaser);
+    }
+    // Legacy single reference: the closest hunter.
+    this.chaser = this.chasers[0];
+  }
+  // The worker-owned simulation receives chasers through the traffic
+  // snapshot, so look them up instead of relying on spawn references.
+  chasePack() {
+    if (this.chasers?.length) return this.chasers;
+    return this.traffic.filter((v) => v.chaser);
+  }
+  activeChaser() {
+    let best = null,
+      bestDist = Infinity;
+    for (const v of this.chasePack()) {
+      const d = dist(v, this.player);
+      if (d < bestDist) {
+        bestDist = d;
+        best = v;
+      }
+    }
+    return best;
+  }
+  pursuerGap() {
+    const chaser = this.activeChaser();
+    if (!chaser) return Infinity;
+    return Math.max(
+      0,
+      dist(chaser, this.player) -
+        (this.player.depth + chaser.depth) / 2,
+    );
+  }
+  pursuerState() {
+    const chaser = this.activeChaser();
+    if (!chaser) return null;
+    const relative = relativeTrafficState(this.player, chaser);
+    const gap = round(this.pursuerGap(), 1);
+    if (this.caught)
+      return {
+        id: chaser.id,
+        car: chaser.label ?? chaser.model,
+        gap_m: gap,
+        status: "caught",
+      };
+    if (this.escaped)
+      return {
+        id: chaser.id,
+        car: chaser.label ?? chaser.model,
+        gap_m: gap,
+        status: "escaped",
+      };
+    return {
+      id: chaser.id,
+      car: chaser.label ?? chaser.model,
+      gap_m: gap,
+      closing_speed_mps: round(Math.max(0, relative.relative_velocity_ahead_mps), 1),
+      status:
+        gap < 10 ? "critical" : gap < 30 ? "closing" : "distant",
+    };
+  }
+  updateChase(dt) {
+    if (this.escaped || this.crash || this.complete) return;
+    // Tagged: 3 seconds to breathe, then the pack drops back into
+    // formation behind the player and the hunt resumes. The drive
+    // never ends on a catch; the counter keeps score.
+    if (this.caught) {
+      this.caughtTimer += dt;
+      if (this.caughtTimer >= 3) {
+        this.caughtTimer = 0;
+        this.releaseChase();
+      }
+      return;
+    }
+    // Escaped once the whole pack falls 90 m behind for 5 seconds.
+    if (this.pursuerGap() > 90) {
+      this.escapeTimer += dt;
+      if (this.escapeTimer > 5) {
+        this.escaped = true;
+        this.chaseStats.escaped++;
+        saveChaseStats(this.chaseStats);
+        this.event("You escaped the chase pack!", "success");
+      }
+    } else this.escapeTimer = 0;
+  }
+  releaseChase() {
+    for (const v of this.chasePack()) {
+      const spec =
+        Simulation.CHASE_PACK.find((s) => s.model === v.model) ??
+        Simulation.CHASE_PACK[0];
+      const behind = move(
+        this.player,
+        angle(this.player.heading + Math.PI),
+        spec.back_m,
+      );
+      const start = move(
+        behind,
+        angle(this.player.heading + Math.PI / 2),
+        spec.side_m,
+      );
+      v.x = start.x;
+      v.z = start.z;
+      v.heading = this.player.heading;
+      v.speed = 0;
+    }
+    this.caught = null;
+    this.escapeTimer = 0;
+    this.event(
+      `Chase #${this.chaseStats.rounds} — the pack is back on you!`,
+      "error",
+    );
+  }
+  updateChaser(v, dt) {
+    if (this.caught || this.escaped || this.crash || this.complete) {
+      v.speed = Math.max(0, v.speed - 7 * dt);
+      v.x += Math.sin(v.heading) * v.speed * dt;
+      v.z -= Math.cos(v.heading) * v.speed * dt;
+      return;
+    }
+    if (dist(v, this.player) < 4.6) {
+      v.speed = 0;
+      const who = v.label ?? v.model ?? "chaser";
+      this.caught = { by: who, time_s: round(this.time, 2) };
+      this.caughtTimer = 0;
+      this.chaseStats.caught[who] = (this.chaseStats.caught[who] ?? 0) + 1;
+      saveChaseStats(this.chaseStats);
+      this.event(`The ${who} tagged you — 3 seconds to breathe`, "error");
+      return;
+    }
+    // Don't hunt a parked car: wait until the player actually drives off.
+    if (Math.abs(this.player.speed) < 2 && this.distance < 3) {
+      v.speed = 0;
+      return;
+    }
+    const desired = heading(v, this.player);
+    v.heading += clamp(angle(desired - v.heading), -2.2 * dt, 2.2 * dt);
+    const want = Math.min(
+      this.world.theme.limit + (v.chaseTop ?? 4),
+      Math.max(0, this.player.speed + (v.chaseExtra ?? 3.5)),
+    );
+    v.speed += clamp(want - v.speed, -7 * dt, 3.5 * dt);
+    v.x = clamp(
+      v.x + Math.sin(v.heading) * v.speed * dt,
+      this.world.bounds.minX,
+      this.world.bounds.maxX,
+    );
+    v.z = clamp(
+      v.z - Math.cos(v.heading) * v.speed * dt,
+      this.world.bounds.minZ,
+      this.world.bounds.maxZ,
+    );
   }
   continueTraffic(v) {
     if (this.world.type === "highway") return;
@@ -425,7 +675,19 @@ export class Simulation {
     const rule = this.rule(v),
       lead = leadVehicle(v, [...this.traffic, this.player]),
       gap = lead?.gap ?? Infinity;
-    let max = Math.min(this.world.theme.limit, routeSpeedLimit(v, v.s)),
+    // A closing pursuer lets the player exceed the limit to escape. Traffic
+    // ahead, conflict, and curve caps below still apply, so fleeing never
+    // means ramming the queue.
+    const fleeing =
+      v === this.player &&
+      this.activeChaser() &&
+      !this.caught &&
+      !this.escaped &&
+      this.pursuerGap() < 45;
+    let max = Math.min(
+        this.world.theme.limit + (fleeing ? 6 : 0),
+        routeSpeedLimit(v, v.s),
+      ),
       reason = null;
     // NPCs obey the scripted traffic rules. Jev gets the observations and
     // decides when the player's car should approach, yield, or stop.
@@ -534,6 +796,11 @@ export class Simulation {
     }
     updateCourtesy(this);
     for (const v of this.traffic) {
+      // The chaser hunts the player directly instead of following a route.
+      if (v.chaser) {
+        this.updateChaser(v, dt);
+        continue;
+      }
       if (v.route.length - v.s < 75) this.continueTraffic(v);
       const rule = this.rule(v, true);
       let target = this.speedEnvelope(v).max;
@@ -566,6 +833,7 @@ export class Simulation {
       v.z = p.z;
       v.heading = heading(p, ahead);
     }
+    if (this.chaseMode) this.updateChase(dt);
     if (this.time >= this.nextScan) {
       this.scanScene();
       this.nextScan = this.time + 0.2;
@@ -642,6 +910,28 @@ export class Simulation {
         z: hit.player.z,
         heading: hit.player.heading,
       });
+      // Touching a hunter ends the drive as "caught", never as a crash,
+      // and hunters stay solid so the player cannot drive through them.
+      if (hit.object.chaser) {
+        if (!this.caught) {
+          const who = hit.object.label ?? hit.object.model ?? "chaser";
+          this.caught = { by: who, time_s: round(this.time, 2) };
+          this.caughtTimer = 0;
+          this.chaseStats.caught[who] = (this.chaseStats.caught[who] ?? 0) + 1;
+          saveChaseStats(this.chaseStats);
+          this.event(`The ${who} tagged you — 3 seconds to breathe`, "error");
+        }
+        Object.assign(hit.object, {
+          x: hit.target.x,
+          z: hit.target.z,
+          heading: hit.target.heading,
+          speed: 0,
+        });
+        this.distance += dist(old, v);
+        v.s = nearestOnPath(v, v.route.points).s;
+        v.speed = v.target = v.steering = 0;
+        return;
+      }
       if (hit.object.type !== "building") {
         Object.assign(hit.object, {
           x: hit.target.x,
@@ -1189,6 +1479,7 @@ export class Simulation {
           "At green lights or after a completed stop, move decisively through the junction. Yield only to actual conflicting priority traffic. Do not wait for the whole intersection to become empty.",
           "Accelerate along a clear on-ramp, match interstate traffic speed while merging, then accelerate to the cruising limit. A ramp-to-merge boundary is a continuous road, not a stop or a U-turn. Slow to fit behind another vehicle only when there is an actual merging conflict.",
           "A close or closing follower behind should motivate faster forward progress when the road ahead allows it. Traffic behind, alongside, or in the opposite lane is not itself a reason to brake.",
+          "A pursuer that is actively chasing you means escape: pick faster forward vectors up to the ceiling and use lane offsets to pull away. Never stop, slow down, or turn toward it while it is closing.",
           "Stay in the right-hand lane, follow a normal traffic queue without passing, and use current signal and collision information. Later hypothetical conflicts are warnings to reassess, not immediate stop commands.",
         ],
       },
@@ -1217,6 +1508,7 @@ export class Simulation {
       traffic: {
         queue: plan.queue,
         rear_pressure: rearPressure,
+        pursuer: this.pursuerState(),
         stopped_for_s: round(
           this.player.waitingSince == null
             ? 0

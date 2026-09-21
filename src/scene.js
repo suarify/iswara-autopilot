@@ -14,7 +14,7 @@ import {
 import { CameraInput } from "./camera-input.js";
 import { SceneryAssets } from "./scenery-assets.js";
 import { Vegetation } from "./vegetation.js";
-import { loadHeroCar, updateHeroWheels } from "./model-assets.js";
+import { loadHeroCar, loadTrafficCar, updateHeroWheels } from "./model-assets.js";
 import { detailedCar } from "./vehicle-model.js";
 import { HDRLoader } from "three/addons/loaders/HDRLoader.js";
 import { assetManager, assetsReady } from "./asset-loading.js";
@@ -797,6 +797,7 @@ export class DriveScene {
     this.scene.add(this.destination);
     this.player = carModel("#e2e5e9");
     this.heroCar = null;
+    this.heroModelId = null;
     this.wheelDistance = this.sim.distance;
     this.wheelDirection = Math.sign(this.sim.player.speed) || 1;
     this.scene.add(this.player);
@@ -811,6 +812,7 @@ export class DriveScene {
         playerGroup.clear();
         playerGroup.add(model);
         this.heroCar = model;
+        this.heroModelId = "stripe-myvi";
         playerGroup.userData.sourcedModel = true;
         playerGroup.userData.eyeHeight = model.userData.eyeHeight;
         playerGroup.userData.eyeForward = model.userData.eyeForward;
@@ -819,9 +821,13 @@ export class DriveScene {
     this.vehicles = new Map();
     this.people = new Map();
     for (const v of this.sim.traffic) {
-      const m = carModel(v.color, v.type === "motorcycle");
-      this.vehicles.set(v.id, m);
-      this.scene.add(m);
+      // Holder keeps render positioning stable while the GLB loads; the
+      // procedural mesh is swapped out once the real model arrives.
+      const holder = new THREE.Group();
+      holder.add(carModel(v.color, v.type === "motorcycle"));
+      this.vehicles.set(v.id, holder);
+      this.scene.add(holder);
+      if (v.model) this.upgradeTrafficModel(v, holder);
     }
     for (const p of this.sim.pedestrians) {
       const m = personModel(p);
@@ -854,6 +860,42 @@ export class DriveScene {
     this.renderer.shadowMap.needsUpdate = true;
     this.snap = true;
     this.ready = Promise.all([environmentReady, carReady, this.scenery.ready]);
+  }
+  upgradeTrafficModel(v, holder) {
+    loadTrafficCar(v.model)
+      .then((model) => {
+        if (this.vehicles.get(v.id) !== holder) {
+          model.traverse((mesh) => mesh.geometry?.dispose());
+          return;
+        }
+        holder.traverse((mesh) => mesh.geometry?.dispose());
+        holder.clear();
+        holder.add(model);
+      })
+      .catch((error) =>
+        console.warn("Traffic model unavailable", v.model, error),
+      );
+  }
+  // Swap the player's car (used by the start-screen picker). The player
+  // group persists, so positioning and cameras keep working.
+  async setHeroModel(id) {
+    if (this.heroModelId === id && this.heroCar) return;
+    const playerGroup = this.player;
+    const model = await loadHeroCar(id);
+    if (this.player !== playerGroup || this.sim.crash) {
+      model.traverse((mesh) => mesh.geometry?.dispose());
+      return;
+    }
+    playerGroup.traverse((mesh) => mesh.geometry?.dispose());
+    playerGroup.clear();
+    playerGroup.add(model);
+    this.heroCar = model;
+    this.heroModelId = id;
+    playerGroup.userData.sourcedModel = true;
+    playerGroup.userData.eyeHeight = model.userData.eyeHeight;
+    playerGroup.userData.eyeForward = model.userData.eyeForward;
+    this.wheelDistance = this.sim.distance;
+    this.wheelDirection = Math.sign(this.sim.player.speed) || 1;
   }
   async prepare() {
     await this.ready;
