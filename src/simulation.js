@@ -43,6 +43,7 @@ export { physics } from "./planning.js";
 import { createDrivingPlan, recoveryBlocked } from "./driving-plan.js";
 import { updateCourtesy } from "./courtesy.js";
 import { routeFromLocation, routesFromLocation } from "./routing.js";
+import { VOICE_COMMANDS } from "./voice.js";
 
 const REROUTE_DISTANCE_M = 30;
 const REROUTE_DELAY_S = 6;
@@ -77,7 +78,7 @@ export const DEFAULT_FLEET = [
   "tesla",
   "wira",
   "myvi",
-  "wira",
+  "bezza",
   "tank",
 ];
 
@@ -159,6 +160,7 @@ export class Simulation {
     this.caughtTimer = 0;
     this.escaped = false;
     this.escapeTimer = 0;
+    this.voice = null;
     if (this.chaseMode) this.spawnChaser();
     this.pedestrians = [];
     for (
@@ -315,6 +317,29 @@ export class Simulation {
     if (this.chasers?.length) return this.chasers;
     return this.traffic.filter((v) => v.chaser);
   }
+  // Escape mode: pack under 20 m. Rule-following (stop lines, reds,
+  // queues) is dropped so Jev can run to survive; collision, pedestrian
+  // and curve safety all stay on. Violations (saman) are still counted.
+  escapeMode() {
+    return (
+      !!this.activeChaser() &&
+      !this.caught &&
+      !this.escaped &&
+      this.pursuerGap() < 20
+    );
+  }
+  // Graded flee response: the nearer the pack, the higher the player may
+  // push above the limit. Jev sees the same gap in the pursuer field and
+  // is instructed to match urgency to distance.
+  fleeBoost() {
+    if (!this.activeChaser() || this.caught || this.escaped) return 0;
+    const gap = this.pursuerGap();
+    if (gap >= 200) return 0;
+    if (gap >= 100) return 2;
+    if (gap >= 45) return 4;
+    if (gap >= 20) return 6;
+    return 9;
+  }
   activeChaser() {
     let best = null,
       bestDist = Infinity;
@@ -363,6 +388,23 @@ export class Simulation {
       status:
         gap < 10 ? "critical" : gap < 30 ? "closing" : "distant",
     };
+  }
+  // Spoken driver command (faster | slower | left | right | uturn).
+  // Applies a timed local bias and is also appended to the Jev request.
+  setVoice(cmd) {
+    const spec = VOICE_COMMANDS[cmd];
+    if (!spec) return null;
+    this.voice = { cmd, until: this.time + spec.seconds };
+    return this.voice;
+  }
+  voiceBias() {
+    if (!this.voice) return { steer: 0, boost: 0, cmd: null };
+    if (this.time > this.voice.until) {
+      this.voice = null;
+      return { steer: 0, boost: 0, cmd: null };
+    }
+    const spec = VOICE_COMMANDS[this.voice.cmd];
+    return { steer: spec.steer, boost: spec.boost_mps, cmd: this.voice.cmd };
   }
   updateChase(dt) {
     if (this.escaped || this.crash || this.complete) return;
@@ -421,6 +463,19 @@ export class Simulation {
       v.x += Math.sin(v.heading) * v.speed * dt;
       v.z -= Math.cos(v.heading) * v.speed * dt;
       return;
+    }
+    // Pack spacing: shove overlapping hunters apart so they stop
+    // knocking through each other when converging on the player.
+    for (const o of this.chasePack()) {
+      if (o === v) continue;
+      const dx = v.x - o.x,
+        dz = v.z - o.z,
+        d = Math.hypot(dx, dz);
+      if (d > 0.01 && d < 5) {
+        const push = ((5 - d) / 5) * 6 * dt;
+        v.x += (dx / d) * push;
+        v.z += (dz / d) * push;
+      }
     }
     if (dist(v, this.player) < 4.6) {
       v.speed = 0;
@@ -678,14 +733,9 @@ export class Simulation {
     // A closing pursuer lets the player exceed the limit to escape. Traffic
     // ahead, conflict, and curve caps below still apply, so fleeing never
     // means ramming the queue.
-    const fleeing =
-      v === this.player &&
-      this.activeChaser() &&
-      !this.caught &&
-      !this.escaped &&
-      this.pursuerGap() < 45;
+    const boost = v === this.player ? this.fleeBoost() : 0;
     let max = Math.min(
-        this.world.theme.limit + (fleeing ? 6 : 0),
+        this.world.theme.limit + boost,
         routeSpeedLimit(v, v.s),
       ),
       reason = null;
@@ -709,7 +759,10 @@ export class Simulation {
       }
     }
     const cap = followingSpeed(v, lead);
-    if (cap < max) {
+    // In escape mode the player doesn't queue behind slow traffic while
+    // the pack closes in. NPCs keep queueing; conflict and curve caps stay.
+    const escape = v === this.player && this.escapeMode();
+    if (!escape && cap < max) {
       max = cap;
       reason =
         lead?.other.type === "motorcycle"
@@ -853,6 +906,10 @@ export class Simulation {
       ? maneuverVelocity(v, v.maneuver, v.target)
       : v.target;
     this.brakeReason = null;
+    const voice = this.voiceBias();
+    // Spoken commands nudge on top of Jev/manual behavior, then the
+    // usual safety caps still apply.
+    if (voice.boost) target = Math.max(0, target + voice.boost);
     if (this.autopilot && this.safety) {
       if (this.lastPlan?.recovery.active) {
         target = clamp(target, -2, 2);
@@ -877,16 +934,20 @@ export class Simulation {
     if (this.complete) target = 0;
     v.appliedTarget = target;
     if (this.autopilot || this.complete) {
-      const steering = v.maneuver
-        ? maneuverSteering(v, v.maneuver)
-        : v.steering;
+      const steering =
+        (v.maneuver ? maneuverSteering(v, v.maneuver) : v.steering) +
+        voice.steer;
       physics(v, steering, target, dt);
     } else
       pedalPhysics(
         v,
-        this.steeringInput,
-        this.pedals.throttle,
-        this.pedals.brake,
+        this.steeringInput + voice.steer,
+        voice.cmd === "faster"
+          ? Math.max(this.pedals.throttle, 0.8)
+          : this.pedals.throttle,
+        voice.cmd === "slower"
+          ? Math.max(this.pedals.brake, 0.6)
+          : this.pedals.brake,
         dt,
       );
     v.x = clamp(v.x, this.world.bounds.minX, this.world.bounds.maxX);
@@ -1442,9 +1503,18 @@ export class Simulation {
           ? 12
           : this.world.theme.limit;
     const ceiling = round(
-      Math.min(env.planningMax, uTurn?.speed_limit_mps ?? Infinity, turnCap),
+      Math.min(
+        env.planningMax,
+        uTurn?.speed_limit_mps ?? Infinity,
+        // Escapees outrun the turn cap too, or the flee boost above does
+        // nothing on straights (the pack runs limit+3..5).
+        turnCap + (this.escapeMode() ? this.fleeBoost() : 0),
+      ),
       1,
     );
+    // Flagged on the car so the planner (main + worker snapshot) can
+    // drop stop-line and queue obedience while escaping.
+    this.player.escapeMode = this.escapeMode();
     const plan = createDrivingPlan(
       this.player,
       this.world,
@@ -1457,8 +1527,7 @@ export class Simulation {
       `b${++this.planSequence}`,
       ceiling,
       env.rule,
-    );
-    this.lastPlan = plan;
+    );    this.lastPlan = plan;
     // Give Jev readable edges in normal driving. The raw mesh patches remain
     // in perception, and are also sent during off-road recovery for context.
     const { drivable_polygons, ...roadSummary } = plan.road;
@@ -1479,7 +1548,7 @@ export class Simulation {
           "At green lights or after a completed stop, move decisively through the junction. Yield only to actual conflicting priority traffic. Do not wait for the whole intersection to become empty.",
           "Accelerate along a clear on-ramp, match interstate traffic speed while merging, then accelerate to the cruising limit. A ramp-to-merge boundary is a continuous road, not a stop or a U-turn. Slow to fit behind another vehicle only when there is an actual merging conflict.",
           "A close or closing follower behind should motivate faster forward progress when the road ahead allows it. Traffic behind, alongside, or in the opposite lane is not itself a reason to brake.",
-          "A pursuer that is actively chasing you means escape: pick faster forward vectors up to the ceiling and use lane offsets to pull away. Never stop, slow down, or turn toward it while it is closing.",
+          "A pursuer that is actively chasing you means escape: pick faster forward vectors up to the ceiling and use lane offsets to pull away. Scale urgency to its gap — within 200 m drive above the limit, under 45 m much faster, under 20 m everything else is secondary to not getting hit: fastest forward vector, lane offset to break contact. Never stop, slow down, or turn toward it while it is closing.",
           "Stay in the right-hand lane, follow a normal traffic queue without passing, and use current signal and collision information. Later hypothetical conflicts are warnings to reassess, not immediate stop commands.",
         ],
       },
@@ -1509,6 +1578,7 @@ export class Simulation {
         queue: plan.queue,
         rear_pressure: rearPressure,
         pursuer: this.pursuerState(),
+        voice_command: this.voiceBias().cmd,
         stopped_for_s: round(
           this.player.waitingSince == null
             ? 0

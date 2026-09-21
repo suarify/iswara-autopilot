@@ -26,6 +26,8 @@ import {
   Github,
   LogOut,
   Key,
+  Mic,
+  Music,
 } from "lucide";
 import { Simulation } from "./simulation.js";
 import { BackgroundPlanner } from "./background-planner.js";
@@ -43,6 +45,9 @@ import { prepareJevRequest, decisionInterval } from "./jev-request.js";
 import { THEMES } from "./world.js";
 import { candidateName, decisionControls } from "./planning.js";
 import { clamp, nearestOnPath } from "./math.js";
+import { parseVoiceAlternatives, voiceGrammarSrc, VOICE_COMMANDS } from "./voice.js";
+import * as THREE from "three";
+import { HERO_MODELS, loadHeroCar } from "./model-assets.js";
 const icons = {
   Braces,
   RotateCw,
@@ -69,6 +74,8 @@ const icons = {
   Github,
   LogOut,
   Key,
+  Mic,
+  Music,
 };
 const icon = (name) => `<i data-lucide="${name}"></i>`,
   $ = (id) => document.getElementById(id);
@@ -104,7 +111,8 @@ let configured = false,
   lastNow = performance.now(),
   toastTimer,
   crashHandled = false,
-  chaseToast = "";
+  chaseToast = "",
+  lastExpireAt = 0;
 const keys = new Set(),
   tally = {
     cost: 0,
@@ -118,17 +126,19 @@ const keys = new Set(),
   };
 $("app").innerHTML = `
 <main class="drive-area" aria-label="3D driving simulator"><canvas id="world-canvas" aria-label="Interactive three-dimensional driving world"></canvas><div id="vector-labels" aria-label="Jev motion vector probabilities"></div></main>
-<header class="topbar glass"><a href="/" class="brand" aria-label="JevPilot by Standard Agents"><img class="brand-mark" src="/brand/standard-agents-mark.svg" alt=""/><b>JevPilot</b></a><div class="world-picker"><select id="world-select" aria-label="World environment"><option value="city">Skyline City</option><option value="town">Small town</option><option value="highway">Interstate 08</option></select><button id="new-world" title="Refresh world" aria-label="Refresh world">${icon("rotate-cw")}</button><a id="github-link" href="https://github.com/standardagents/jevpilot" target="_blank" rel="noopener noreferrer" aria-label="View JevPilot on GitHub (opens in a new tab)" title="View on GitHub">${icon("github")}</a></div></header>
+<header class="topbar glass"><a href="/" class="brand" aria-label="Kancil Autopilot"><img class="brand-mark" src="/logokancil.jpg" alt=""/><b>Kancil Autopilot</b></a><div class="world-picker"><select id="world-select" aria-label="World environment"><option value="city">Skyline City</option><option value="town">Small town</option><option value="highway">Interstate 08</option></select><button id="new-world" title="Refresh world" aria-label="Refresh world">${icon("rotate-cw")}</button><a id="github-link" href="https://github.com/standardagents/jevpilot" target="_blank" rel="noopener noreferrer" aria-label="View JevPilot on GitHub (opens in a new tab)" title="View on GitHub">${icon("github")}</a></div></header>
 <div class="navigation-hud"><div class="navigation-card glass"><span id="turn-icon">${icon("arrow-up")}</span><div><strong id="next-maneuver">Continue straight</strong><span id="turn-distance"></span></div><span class="nav-divider"></span><span id="remaining"></span><button id="map-toggle" aria-label="Toggle route map" aria-pressed="true" title="Hide route map">${icon("map")}</button></div>
 <div id="minimap" class="minimap glass"><div class="minimap-toolbar" role="toolbar" aria-label="Minimap controls"><button id="map-drag" aria-label="Move minimap" title="Move minimap · drag or use arrow keys">${icon("grip")}</button><div><button id="map-zoom-out" aria-label="Zoom out" title="Zoom out">${icon("minus")}</button><button id="map-zoom-in" aria-label="Zoom in" title="Zoom in">${icon("plus")}</button><button id="map-reset" aria-label="Reset minimap" title="Reset map position, zoom and following">${icon("rotate-ccw")}</button></div></div><canvas id="map-canvas" width="380" height="310" aria-label="Route map. Drag to pan, scroll to zoom, double-click to follow the car."></canvas></div></div>
 <div id="paused-overlay" hidden><div class="glass"><span>${icon("pause")} Paused</span><button id="resume" class="primary">Resume driving</button></div></div>
+<div id="chase-banner" hidden></div>
 <div id="arrival" class="arrival glass" hidden><span class="arrival-mark">${icon("flag")}</span><span class="eyebrow">DESTINATION REACHED</span><h1>You made it.</h1><p id="arrival-summary"></p><button id="next-trip" class="primary">Next drive ${icon("arrow-up-right")}</button><button id="keep-driving" class="subtle">Keep exploring</button></div>
-<div class="bottom-hud"><div class="driver-dock glass"><div class="speed-cluster"><div title="Current speed"><strong id="speed">0</strong><span>km/h</span></div><span class="speed-limit" title="Speed limit"><small>LIMIT</small><b id="speed-limit">50</b></span></div><span class="dock-divider"></span><div class="pilot-actions"><button id="autopilot" class="pilot-button" role="switch" aria-checked="false" aria-label="Jev autopilot" title="Engage Jev · J">${icon("sparkles")}<span id="pilot-label">Engage Jev</span><kbd>J</kbd></button><button id="candidates-toggle" class="candidate-button" aria-label="Show steering candidates" aria-pressed="false" title="Show steering candidates"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 20V3m-3 3 3-3 3 3M12 20C12 14 7 12 3 8m0 3V8h3M12 20c0-6 5-8 9-12m-3 0h3v3"/><circle cx="12" cy="21" r="1" fill="currentColor" stroke="none"/></svg></button></div><div id="decision-status"><span id="pilot-state">Free play</span><span id="context-message">WASD to drive · Space to brake</span><span class="cost-total" title="Estimated cost from Jev-reported token usage and configured pricing."><span id="cost-label">Session</span> <strong id="cost">$0.000000</strong></span></div><span class="dock-divider"></span><div class="dock-tools" role="group" aria-label="View and driving controls"><button id="camera" title="Change camera · C" aria-label="Change camera">${icon("video")}<span id="camera-name">Chase</span></button><button id="scene-json" aria-label="Inspect live JSON" title="Inspect live JSON">${icon("braces")}</button><button id="fullscreen" aria-label="Enter fullscreen" title="Fullscreen">${icon("maximize")}</button><span class="divider"></span><button id="jev-key" aria-label="Jev API key" title="Add your Jev key">${icon("key")}</button><button id="pause" aria-label="Pause simulation" title="Pause · P">${icon("pause")}</button><button id="sign-out" hidden aria-label="Sign out" title="Sign out">${icon("log-out")}</button></div></div></div>
+<div id="intro-overlay" hidden><div class="intro-card glass"><img class="intro-logo" src="/logokancil.jpg" alt="Teal Kancil" /><span class="eyebrow">KANCIL AUTOPILOT</span><h1>Outrun the Myvi gang.</h1><p>Reach the destination flag before the Myvi, Wira and Tesla hunters tag you. Tagged? You get 3 seconds — then they're back on you. Don't bang anything: saman is expensive.</p><canvas id="car-preview" width="520" height="300" aria-label="Preview of your car. Drag to spin it around."></canvas><div class="car-picker"><button id="car-prev" aria-label="Previous car">‹</button><strong id="car-name">Myvi Stripy</strong><button id="car-next" aria-label="Next car">›</button></div><div id="car-dots" class="car-dots"></div><div class="intro-actions"><button id="voice-intro" class="subtle" aria-label="Voice command">${icon("mic")} Voice</button><button id="start-drive" class="primary">Start drive</button></div><p class="intro-keys">WASD drive · J autopilot · drag the car to spin it</p></div></div>
+<div class="bottom-hud"><div class="driver-dock glass"><div class="speed-cluster"><div title="Current speed"><strong id="speed">0</strong><span>km/h</span></div><span class="speed-limit" title="Speed limit"><small>LIMIT</small><b id="speed-limit">50</b></span></div><span class="dock-divider"></span><div class="pilot-actions"><button id="autopilot" class="pilot-button" role="switch" aria-checked="false" aria-label="Jev autopilot" title="Engage Jev · J">${icon("sparkles")}<span id="pilot-label">Engage Jev</span><kbd>J</kbd></button><button id="candidates-toggle" class="candidate-button" aria-label="Show steering candidates" aria-pressed="false" title="Show steering candidates"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 20V3m-3 3 3-3 3 3M12 20C12 14 7 12 3 8m0 3V8h3M12 20c0-6 5-8 9-12m-3 0h3v3"/><circle cx="12" cy="21" r="1" fill="currentColor" stroke="none"/></svg></button></div><div id="decision-status"><span id="pilot-state">Free play</span><span id="context-message">WASD to drive · Space to brake</span><span id="jev-ms" class="jev-ms" title="Last Jev decision round-trip"></span><span class="cost-total" title="Estimated cost from Jev-reported token usage and configured pricing."><span id="cost-label">Session</span> <strong id="cost">$0.000000</strong></span></div><span class="dock-divider"></span><div class="dock-tools" role="group" aria-label="View and driving controls"><button id="camera" title="Change camera · C" aria-label="Change camera">${icon("video")}<span id="camera-name">Chase</span></button><button id="scene-json" aria-label="Inspect live JSON" title="Inspect live JSON">${icon("braces")}</button><button id="fullscreen" aria-label="Enter fullscreen" title="Fullscreen">${icon("maximize")}</button><span class="divider"></span><button id="music" aria-label="Background music" title="Kompang Cruise on/off">${icon("music")}</button><button id="voice" aria-label="Voice command" title="Voice: faster, slower, left, right, U-turn">${icon("mic")}</button><button id="jev-key" aria-label="Jev API key" title="Add your Jev key">${icon("key")}</button><button id="pause" aria-label="Pause simulation" title="Pause · P">${icon("pause")}</button><button id="sign-out" hidden aria-label="Sign out" title="Sign out">${icon("log-out")}</button></div></div></div>
 <dialog id="crash-dialog" aria-labelledby="crash-title" aria-describedby="crash-description"><span class="crash-symbol">${icon("x")}</span><span class="eyebrow">DRIVE ENDED</span><h1 id="crash-title">Game over.</h1><p id="crash-description"></p><div class="crash-stats"><div><strong id="crash-speed"></strong><span>km/h at impact</span></div><div><strong id="crash-distance"></strong><span>meters driven</span></div></div><button id="retry-drive" class="primary">${icon("rotate-ccw")} Restart drive</button><button id="crash-new-world" class="secondary">Try a new world ${icon("arrow-up-right")}</button></dialog>
 <dialog id="credit-dialog" aria-labelledby="credit-title"><span class="eyebrow">THANKS FOR TAKING A DRIVE</span><h2 id="credit-title">That's your free lap.</h2><p>Your $0.25 of Jev play credit has been used. You can keep exploring with manual controls.</p><button id="credit-close" class="primary">Keep driving manually</button><a href="https://standardagents.ai/" target="_blank" rel="noopener noreferrer">Explore Standard Agents ↗</a></dialog>
 <dialog id="key-dialog" aria-labelledby="key-title"><span class="eyebrow">JEV AUTOPILOT KEY</span><h2 id="key-title">Use your own Jev key.</h2><p>Paste a <a href="https://typesafe.ai/" target="_blank" rel="noopener noreferrer">TypeSafe AI</a> key to engage autopilot. It stays in this browser and is only sent to this server with drive requests — never displayed or logged.</p><input id="jev-key-input" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your TypeSafe AI key" aria-label="TypeSafe AI key" /><p id="jev-key-status" class="key-status" aria-live="polite"></p><div class="dialog-actions"><button id="key-save" class="primary">Save key</button><button id="key-test" class="secondary">Test</button><button id="key-clear" class="subtle">Remove</button><button id="key-close" class="subtle">Close</button></div></dialog>
 <div id="toast" role="status" hidden></div>
-<dialog id="json-dialog"><div class="json-header"><div>${icon("braces")}<strong>Under the hood</strong><span id="json-live">LIVE · 4 Hz</span></div><button id="close-json" aria-label="Close JSON inspector">${icon("x")}</button></div><div class="json-toolbar"><div class="json-tabs"><button data-tab="request" class="active">Jev input</button><button data-tab="sensor">Perception</button><button data-tab="world">Full world</button><button data-tab="decision">Response</button></div><div class="json-actions"><button id="freeze-json">Freeze</button><button id="copy-json" aria-label="Copy displayed JSON">${icon("copy")} <span id="copy-json-label" aria-live="polite">Copy</span></button><button id="download-json">${icon("download")} Download</button></div></div><p id="json-description">Exact Jev API payload, including instructions and offered choices. Full geometry and control details stay local.</p><pre id="json-content"></pre></dialog>
+<dialog id="json-dialog"><div class="json-header"><div>${icon("braces")}<strong>Under the hood</strong><span id="json-live">LIVE · 4 Hz</span></div><button id="close-json" aria-label="Close JSON inspector">${icon("x")}</button></div><div class="json-toolbar"><div class="json-tabs"><button data-tab="request" class="active">Jev input</button><button data-tab="sensor">Perception</button><button data-tab="world">Full world</button><button data-tab="decision">Response</button><button data-tab="voice">Voice</button></div><div class="json-actions"><button id="freeze-json">Freeze</button><button id="copy-json" aria-label="Copy displayed JSON">${icon("copy")} <span id="copy-json-label" aria-live="polite">Copy</span></button><button id="download-json">${icon("download")} Download</button></div></div><p id="json-description">Exact Jev API payload, including instructions and offered choices. Full geometry and control details stay local.</p><pre id="json-content"></pre></dialog>
 <dialog id="help-dialog"><button id="close-help" class="dialog-close" aria-label="Close help">${icon("x")}</button><span class="eyebrow">YOUR NEXT DRIVE</span><h2>Take the wheel.</h2><p class="touch-help">Use the thumbstick to steer. Push up to accelerate, pull down to brake and reverse. Release to coast; hold Brake to stop.</p><div class="help-keys"><span><kbd>W / ↑</kbd> Hold accelerator</span><span><kbd>S / ↓</kbd> Brake / reverse</span><span><kbd>A / D</kbd> Steer</span><span><kbd>SPACE</kbd> Brake</span><span><kbd>J</kbd> Jev autopilot</span><span><kbd>C</kbd> Camera</span><span><kbd>P</kbd> Pause</span><span><kbd>?</kbd> Keyboard help</span></div><p>Drag the scene to orbit in Chase or Bird’s eye; drag to look around in Driver view. Scroll to zoom outside; double-click to recenter. Tap A/D for small corrections; hold for a sharper turn and release to recenter. Hold W to accelerate; release to coast with drag. S brakes, then reverses once stopped. Space applies the brake. Autopilot sets target speed directly.</p><p>The bright blue line is Jev's selected three-second plan. Use Candidates to see the sampled paths: forward in blue/cyan, reverse in purple, lane departures in amber, and predicted collisions in orange. Choice probabilities are available in the JSON inspector. The safety brake can reduce speed for a missed hazard; interventions are shown beside the autopilot button.</p><p class="asset-credits">Vehicle: <a href="https://sketchfab.com/3d-models/tesla-model-y-2021-c0a86cac582d4b33aba0fb1b1912d970" target="_blank" rel="noreferrer">Tesla Model Y 2021</a> by 763468712, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer">CC BY 4.0</a>. Geometry adapted by Tina 3D Tesla; optimized, re-materialed, and wheel-rigged for JevPilot. Tree, shrub, streetlight, surface textures and sky: <a href="https://polyhaven.com" target="_blank" rel="noreferrer">Poly Haven</a>, CC0.</p><p>Driving keys take back control. Use the JSON button for live inputs, full world state, probabilities, and session telemetry.</p></dialog>`;
 $("app").insertAdjacentHTML(
   "beforeend",
@@ -382,6 +392,16 @@ async function finishLoading() {
   touch.sync();
   updateUI();
   drawMap();
+  // Try music on load; browsers that block autoplay get it on first tap.
+  applyMusic();
+  const unlock = () => {
+    applyMusic();
+    removeEventListener("pointerdown", unlock);
+    removeEventListener("keydown", unlock);
+  };
+  addEventListener("pointerdown", unlock);
+  addEventListener("keydown", unlock);
+  showIntro();
 }
 function changeCamera() {
   const modes = ["chase", "hood", "map"];
@@ -398,7 +418,7 @@ function changeCamera() {
   );
 }
 function togglePause() {
-  if (sim.crash || loading) return;
+  if (sim.crash || loading || !$("intro-overlay").hidden) return;
   touch.reset();
   keys.clear();
   sim.paused = !sim.paused;
@@ -600,6 +620,381 @@ $("key-clear").onclick = () => {
   refreshKeyButton();
   openKeyDialog();
 };
+let voiceRec = null,
+  voiceListening = false,
+  voiceInterim = "",
+  lastVoiceFire = 0,
+  voiceRestarts = [];
+const voiceLog = [];
+function logVoiceMic(event, detail) {
+  voiceLog.unshift({ mic: event, ...(detail ? { detail } : {}) });
+  voiceLog.splice(20);
+}
+function refreshVoiceButton() {
+  const button = $("voice");
+  if (!button) return;
+  button.classList.toggle("listening", voiceListening);
+  tooltips.set(
+    button,
+    voiceListening
+      ? "Listening… speak now"
+      : "Voice: faster, slower, left, right, U-turn",
+  );
+}
+function toggleVoice() {
+  const Recognition =
+    window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!Recognition) {
+    toast("Voice input is not supported in this browser.", "error");
+    return;
+  }
+  if (voiceListening) {
+    // Manual stop: clear the flag first so onend doesn't auto-restart.
+    voiceListening = false;
+    voiceInterim = "";
+    refreshVoiceButton();
+    try {
+      voiceRec.stop();
+    } catch {
+      /* already stopped */
+    }
+    return;
+  }
+  voiceRec = new Recognition();
+  voiceRec.lang = "en-US";
+  // Continuous + interim = realtime feel: commands fire while you speak
+  // instead of waiting for one short clip to finish.
+  voiceRec.continuous = true;
+  voiceRec.interimResults = true;
+  // Rank several alternatives: Manglish accents often land the command
+  // in 2nd/3rd place, and we match mishearings (write→right…).
+  voiceRec.maxAlternatives = 5;
+  // Bias the recognizer toward our tiny EN+MS vocabulary where supported.
+  try {
+    const GrammarList =
+      window.SpeechGrammarList || window.webkitSpeechGrammarList;
+    if (GrammarList) {
+      const grammars = new GrammarList();
+      grammars.addFromString(voiceGrammarSrc(), 1);
+      voiceRec.grammars = grammars;
+    }
+  } catch {
+    /* grammar unsupported — keyword matching still applies */
+  }
+  const fireVoiceCommand = (cmd, text) => {
+    sim.setVoice(cmd);
+    lastVoiceFire = performance.now();
+    voiceLog.unshift({
+      at_sim_s: Math.round(sim.time * 10) / 10,
+      heard: text.trim(),
+      command: VOICE_COMMANDS[cmd].label,
+      jev: null,
+    });
+    voiceLog.splice(20);
+    toast(`Voice: ${VOICE_COMMANDS[cmd].label} — “${text.trim()}”`);
+  };
+  voiceRec.onresult = (event) => {
+    const finals = [];
+    let interim = "";
+    // Only results new since the last event; interim shows live.
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const result = event.results[i],
+        alts = [...result].map((alt) => alt.transcript);
+      if (result.isFinal) finals.push(...alts);
+      else if (alts[0]) interim += `${alts[0]} `;
+    }
+    voiceInterim = interim.trim();
+    // Realtime: fire on interim matches too (2.5 s cooldown per command).
+    if (voiceInterim && performance.now() - lastVoiceFire > 2500) {
+      const live = parseVoiceCommand(voiceInterim);
+      if (live && VOICE_COMMANDS[live]) {
+        const heard = voiceInterim;
+        voiceInterim = "";
+        fireVoiceCommand(live, heard);
+        return;
+      }
+    }
+    if (!finals.length) return;
+    voiceInterim = "";
+    const found = parseVoiceAlternatives(finals);
+    if (found && VOICE_COMMANDS[found.cmd]) {
+      fireVoiceCommand(found.cmd, found.text);
+    } else
+      toast(
+        `Didn't catch that: “${(finals[0] || "").trim()}” — try: faster, slower, left, right, U-turn`,
+        "error",
+      );
+  };
+  voiceRec.onend = () => {
+    voiceInterim = "";
+    // Chrome ends sessions on pauses — auto-restart while toggled on.
+    if (voiceListening) {
+      const now = performance.now();
+      voiceRestarts = voiceRestarts.filter((t) => now - t < 10000);
+      if (voiceRestarts.length >= 5) {
+        voiceListening = false;
+        refreshVoiceButton();
+        logVoiceMic("restart-loop");
+        toast("Mic keeps dropping — tap voice to retry.", "error");
+        return;
+      }
+      voiceRestarts.push(now);
+      try {
+        voiceRec.start();
+      } catch {
+        voiceListening = false;
+        refreshVoiceButton();
+      }
+      return;
+    }
+    refreshVoiceButton();
+  };
+  const MIC_ERRORS = {
+    "not-allowed":
+      "Mic blocked — allow the microphone for this site, then tap voice again.",
+    "audio-capture": "No microphone found on this device.",
+    network: "Speech recognition needs internet — check your connection.",
+    "service-not-allowed": "Speech service blocked in this browser.",
+  };
+  voiceRec.onerror = (event) => {
+    if (event.error === "aborted" || event.error === "no-speech") return;
+    logVoiceMic("error", event.error);
+    toast(MIC_ERRORS[event.error] ?? `Mic error: ${event.error}`, "error");
+  };
+  voiceRec.onstart = () => logVoiceMic("listening");
+  try {
+    voiceRec.start();
+    voiceListening = true;
+    refreshVoiceButton();
+  } catch {
+    toast("Could not start the mic.", "error");
+  }
+}
+$("voice").onclick = () => toggleVoice();
+// ---- Background music (Kompang Cruise), on from the first tap ----
+const MUSIC_STORAGE = "kancil.music_on";
+let musicOn = true;
+try {
+  musicOn = localStorage.getItem(MUSIC_STORAGE) !== "off";
+} catch {
+  /* storage unavailable: default on */
+}
+const bgm = new Audio("/KompangCruise.mp3");
+bgm.loop = true;
+bgm.volume = 0.35;
+function refreshMusicButton() {
+  const button = $("music");
+  if (!button) return;
+  button.classList.toggle("muted", !musicOn);
+  tooltips.set(button, musicOn ? "Mute background music" : "Play background music");
+}
+function applyMusic() {
+  refreshMusicButton();
+  if (!musicOn) {
+    bgm.pause();
+    return;
+  }
+  bgm.play().catch(() => {
+    /* autoplay blocked until the next user gesture */
+  });
+}
+$("music").onclick = () => {
+  musicOn = !musicOn;
+  try {
+    localStorage.setItem(MUSIC_STORAGE, musicOn ? "on" : "off");
+  } catch {
+    /* ignore */
+  }
+  applyMusic();
+};
+refreshMusicButton();
+// ---- Chase taunts: the pack talks smack while it hunts ----
+// Random rotation across the three clips, never the same twice in a row,
+// with playback-rate jitter so even repeats sound a little different.
+const TAUNTS = ["/apalumau.mp3", "/apalumau2.mp3", "/apalumau3.mp3"];
+const tauntAudio = TAUNTS.map((src) => {
+  const clip = new Audio(src);
+  clip.preload = "auto";
+  return clip;
+});
+let lastTaunt = -1,
+  nextTauntAt = 0;
+function playTaunt() {
+  if (!musicOn) return;
+  let pick = 0;
+  if (tauntAudio.length > 1)
+    do {
+      pick = Math.floor(Math.random() * tauntAudio.length);
+    } while (pick === lastTaunt);
+  lastTaunt = pick;
+  const clip = tauntAudio[pick];
+  try {
+    clip.playbackRate = 0.92 + Math.random() * 0.16;
+    clip.currentTime = 0;
+    clip.play().catch(() => {
+      /* autoplay blocked until first tap */
+    });
+  } catch {
+    /* audio unavailable */
+  }
+}
+// ---- Crash bang: synthesized noise burst + metallic drop, no asset ----
+let crashAudio = null;
+function playCrashSound(impactMps = 5) {
+  try {
+    crashAudio ??= new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = crashAudio;
+    if (ctx.state === "suspended") ctx.resume();
+    const dur = 0.5,
+      buffer = ctx.createBuffer(1, ctx.sampleRate * dur, ctx.sampleRate),
+      data = buffer.getChannelData(0);
+    for (let i = 0; i < data.length; i++)
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / data.length, 2);
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    const filter = ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.value = 750;
+    const gain = ctx.createGain();
+    gain.gain.value = Math.min(0.6, 0.25 + impactMps * 0.02);
+    src.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctx.destination);
+    src.start();
+    const osc = ctx.createOscillator();
+    osc.type = "square";
+    osc.frequency.setValueAtTime(220, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(55, ctx.currentTime + 0.3);
+    const clang = ctx.createGain();
+    clang.gain.setValueAtTime(0.1, ctx.currentTime);
+    clang.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+    osc.connect(clang);
+    clang.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.4);
+  } catch {
+    /* audio unavailable */
+  }
+}
+// ---- Intro showroom: goal, 3D car preview, picker, voice, start ----
+let heroChoice =
+    HERO_MODELS.some((m) => m.id === params.get("car"))
+      ? params.get("car")
+      : "stripe-myvi",
+  introShown = false,
+  preview = null,
+  previewIndex = Math.max(
+    0,
+    HERO_MODELS.findIndex((m) => m.id === heroChoice),
+  ),
+  previewSpin = 0,
+  previewIdle = 0,
+  previewCarId = null;
+function previewScene() {
+  if (preview) return preview;
+  const canvas = $("car-preview"),
+    renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+  const scene3d = new THREE.Scene(),
+    camera = new THREE.PerspectiveCamera(38, 520 / 300, 0.1, 100);
+  camera.position.set(4.6, 2.1, -5.4);
+  camera.lookAt(0, 0.7, 0);
+  scene3d.add(new THREE.HemisphereLight(0xffffff, 0x3a4a5a, 1.1));
+  const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+  sun.position.set(4, 7, -3);
+  scene3d.add(sun);
+  const holder = new THREE.Group();
+  scene3d.add(holder);
+  preview = { renderer, scene3d, camera, holder };
+  let dragging = false,
+    lastX = 0;
+  canvas.addEventListener("pointerdown", (e) => {
+    dragging = true;
+    lastX = e.clientX;
+    canvas.setPointerCapture(e.pointerId);
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    previewSpin += (e.clientX - lastX) * 0.012;
+    lastX = e.clientX;
+    previewIdle = 0;
+  });
+  const stop = () => (dragging = false);
+  canvas.addEventListener("pointerup", stop);
+  canvas.addEventListener("pointercancel", stop);
+  return preview;
+}
+async function setPreviewCar(id) {
+  const spec = HERO_MODELS.find((m) => m.id === id) ?? HERO_MODELS[0];
+  previewIndex = HERO_MODELS.indexOf(spec);
+  heroChoice = spec.id;
+  $("car-name").textContent = spec.label;
+  [...$("car-dots").children].forEach((dot, i) =>
+    dot.classList.toggle("active", i === previewIndex),
+  );
+  if (previewCarId === spec.id) return;
+  previewCarId = spec.id;
+  const { holder } = previewScene();
+  holder.traverse((mesh) => mesh.geometry?.dispose?.());
+  holder.clear();
+  try {
+    holder.add(await loadHeroCar(spec.id));
+  } catch (error) {
+    console.warn("Preview model unavailable", spec.id, error);
+  }
+}
+function renderPreview(dt) {
+  if ($("intro-overlay").hidden || !preview || !preview.holder.children.length)
+    return;
+  previewIdle += dt;
+  if (previewIdle > 2) previewSpin += dt * 0.35;
+  preview.holder.rotation.y = previewSpin;
+  preview.renderer.render(preview.scene3d, preview.camera);
+}
+function showIntro() {
+  if (introShown) return;
+  introShown = true;
+  sim.paused = true;
+  $("paused-overlay").hidden = true;
+  if (!$("car-dots").children.length)
+    for (const spec of HERO_MODELS) {
+      const dot = document.createElement("button");
+      dot.setAttribute("aria-label", spec.label);
+      dot.onclick = () => setPreviewCar(spec.id);
+      $("car-dots").append(dot);
+    }
+  setPreviewCar(heroChoice);
+  $("intro-overlay").hidden = false;
+  syncPilot();
+  updateUI();
+}
+$("car-prev").onclick = () =>
+  setPreviewCar(
+    HERO_MODELS[(previewIndex + HERO_MODELS.length - 1) % HERO_MODELS.length].id,
+  );
+$("car-next").onclick = () =>
+  setPreviewCar(HERO_MODELS[(previewIndex + 1) % HERO_MODELS.length].id);
+$("voice-intro").onclick = () => toggleVoice();
+$("start-drive").onclick = async () => {
+  const button = $("start-drive");
+  button.disabled = true;
+  button.textContent = "Preparing…";
+  applyMusic();
+  try {
+    await scene.setHeroModel(heroChoice);
+  } catch (error) {
+    toast("Could not load that car.", "error");
+  }
+  $("intro-overlay").hidden = true;
+  sim.paused = false;
+  touch.sync();
+  generation++;
+  lastApplied = 0;
+  nextDecision = 0;
+  button.disabled = false;
+  button.textContent = "Start drive";
+  updateUI();
+};
 $("key-test").onclick = async () => {
   // Validate the typed (or saved) key against TypeSafe without driving.
   const candidate = $("jev-key-input").value.trim() || getJevKey();
@@ -679,6 +1074,14 @@ function inspectData() {
           : 0,
       },
     };
+  if (inspectorTab === "voice")
+    return voiceLog.length
+      ? { log: voiceLog }
+      : {
+          status:
+            "No voice commands yet — tap the mic and say: faster, slower, left, right, U-turn.",
+          log: [],
+        };
   return sim.observation(inspectorTab === "world");
 }
 let copyFeedbackTimer;
@@ -855,6 +1258,18 @@ async function decide() {
     if (lastApplied) tally.intervals.push(now - lastApplied);
     if (tally.intervals.length > 20) tally.intervals.shift();
     lastDecision = { ...data, received_at_simulation_s: sim.time };
+    // Link Jev's answer back to the latest voice command still waiting.
+    const pendingVoice = voiceLog.find((entry) => !entry.jev);
+    if (pendingVoice) {
+      pendingVoice.jev = {
+        choice: data.selection?.choice ?? data.answers?.vector?.choice ?? null,
+        confidence:
+          data.selection?.confidence ??
+          data.answers?.vector?.confidence ??
+          null,
+        latency_ms: data.latency_ms,
+      };
+    }
     lastContext = state;
     lastApplied = now;
     errors = 0;
@@ -868,6 +1283,7 @@ async function decide() {
       sim.player.target = 0;
       scene.vectors.clear();
       errors++;
+      if (error.message.includes("expired")) lastExpireAt = performance.now();
       nextDecision = performance.now() + Math.min(15000, 1000 * 2 ** errors);
       toast(error.message, "error");
       sim.event(error.message, "error");
@@ -1051,6 +1467,7 @@ function updateUI() {
     $("context-message").textContent = `Tagged by ${by}${times} — chase resumes in 3s`;
     if (chaseToast !== "caught") {
       chaseToast = "caught";
+      playTaunt();
       toast(`The ${sim.caught.by ?? "chaser"} tagged you${times}!`, "error");
     }
   } else if (sim.escaped) {
@@ -1061,15 +1478,56 @@ function updateUI() {
       toast("You escaped the chase pack!");
     }
   } else if (sim.activeChaser() && sim.pursuerGap() < 45) {
-    if (chaseToast === "caught") toast("The pack is back on you!");
+    if (chaseToast === "caught") {
+      toast("The pack is back on you!");
+      playTaunt();
+    }
     chaseToast = "";
     const who = sim.activeChaser().label ?? sim.activeChaser().model ?? "chaser";
     $("context-message").textContent +=
       ` · Chase #${sim.chaseStats.rounds} · ${who} on your tail — escape!`;
+    // While they're right on the bumper, talk smack every 12–20 s.
+    if (sim.pursuerGap() < 20 && sim.time > nextTauntAt) {
+      nextTauntAt = sim.time + 12 + Math.random() * 8;
+      playTaunt();
+    }
   } else chaseToast = "";
+  const voiceCmd = sim.voiceBias().cmd;
+  if (voiceCmd && VOICE_COMMANDS[voiceCmd])
+    $("context-message").textContent += ` · 🎤 ${VOICE_COMMANDS[voiceCmd].label}`;
+  else if (voiceListening && voiceInterim)
+    $("context-message").textContent += ` · 🎤 “${voiceInterim}”`;
+  if (performance.now() - lastExpireAt < 2500)
+    $("context-message").textContent += " · Decision expired — replanning";
+  // Proximity banner: lights up as the pack closes, with live meters.
+  // Under 20 m it becomes the break-the-rules-to-survive mode banner.
+  const banner = $("chase-banner"),
+    hunter = sim.activeChaser?.() ?? null,
+    gapM = hunter ? Math.max(0, Math.round(sim.pursuerGap())) : Infinity;
+  if (banner) {
+    if (!hunter || sim.caught || sim.escaped || gapM > 60) {
+      banner.hidden = true;
+    } else {
+      const who = hunter.label ?? hunter.model ?? "chaser",
+        survive = gapM < 20;
+      banner.hidden = false;
+      banner.textContent = survive
+        ? `🏃 BREAK-THE-RULES MODE · ${who} ${gapM} m`
+        : `⚠ ${who} ${gapM} m behind`;
+      banner.classList.toggle("critical", survive || gapM < 15);
+      // The nearer, the more solid the warning.
+      banner.style.opacity = String(
+        survive ? 1 : 0.45 + 0.55 * (1 - gapM / 60),
+      );
+    }
+  }
   $("cost").textContent = playCredits
     ? `$${Math.max(0, playCredits.remaining_usd).toFixed(4)}`
     : `$${tally.cost.toFixed(6)}`;
+  $("jev-ms").textContent =
+    sim.autopilot && lastDecision?.latency_ms != null
+      ? `${lastDecision.latency_ms} ms`
+      : "";
   if (sim.complete && !sim.freeExplore) {
     $("arrival").hidden = false;
     $("arrival-summary").textContent =
@@ -1119,6 +1577,7 @@ function animate(now) {
   }
   if (sim.crash && !crashHandled) {
     crashHandled = true;
+    playCrashSound(sim.crash.impact_speed_mps);
     generation++;
     keys.clear();
     scene.vectors.clear();
@@ -1149,6 +1608,7 @@ function animate(now) {
     requestPreview();
   }
   scene.render(dt);
+  renderPreview(dt);
   if (!$("minimap").hidden && now - lastMapDraw >= 100) {
     drawMap();
     lastMapDraw = now;

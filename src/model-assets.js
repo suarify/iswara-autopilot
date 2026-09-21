@@ -83,6 +83,7 @@ export const TRAFFIC_MODELS = {
   wira: { file: "/models/model-y/wira.glb", flip: Math.PI },
   myvi: { file: "/models/model-y/myvi.glb", flip: Math.PI },
   tank: { file: "/models/model-y/tank.glb", flip: Math.PI },
+  bezza: { file: "/models/model-y/bezzabrown.glb", flip: 0 },
 };
 const trafficAssets = new Map();
 
@@ -114,10 +115,14 @@ export async function loadTrafficCar(name) {
 
 export const HERO_MODELS = [
   { id: "tesla", label: "Tesla", file: "/models/model-y/tesla.glb", flip: 0, rigged: true },
-  { id: "stripe-myvi", label: "Myvi Stripy", file: "/models/model-y/model-y.glb", flip: 0, size: 0.75 },
+  { id: "stripe-myvi", label: "Kancil", file: "/models/model-y/model-y.glb", flip: 0, size: 0.75 },
   { id: "wira", label: "Wira", file: "/models/model-y/wira.glb", flip: Math.PI },
   { id: "tank", label: "Tank", file: "/models/model-y/tank.glb", flip: Math.PI },
   { id: "red-myvi", label: "Myvi Red", file: "/models/model-y/myvi.glb", flip: Math.PI },
+  { id: "bezza", label: "Bezza Brown", file: "/models/model-y/bezzabrown.glb", flip: Math.PI },
+  { id: "yellow-myvi", label: "Myvi Yellow", file: "/models/model-y/yellow-myvi.glb", flip: Math.PI },
+  { id: "red-kancil", label: "Kancil Red", file: "/models/model-y/redkancil.glb", flip: 0, size: 0.75 },
+  { id: "white-myvi", label: "Myvi White", file: "/models/model-y/myvi-model-y-white-red.glb", flip: Math.PI },
 ];
 
 // Rigged builder for the original Model Y / Tesla asset. Throws when the

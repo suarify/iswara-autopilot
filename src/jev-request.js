@@ -1,4 +1,5 @@
 import { decisionOptions } from "./planning.js";
+import { VOICE_COMMANDS } from "./voice.js";
 
 const rounded = (value) =>
   Number.isFinite(value) ? Math.round(value * 10) / 10 : null;
@@ -90,6 +91,13 @@ export function prepareJevRequest(full) {
   const nearby = full.scene?.nearby || [];
   const follower = full.traffic?.rear_pressure;
   const pursuer = full.traffic?.pursuer;
+  const escape =
+    pursuer &&
+    !["escaped", "caught"].includes(pursuer.status) &&
+    pursuer.gap_m != null &&
+    pursuer.gap_m < 20;
+  const voiceCmd = full.traffic?.voice_command;
+  const voiceSpec = (voiceCmd && VOICE_COMMANDS[voiceCmd]) || null;
   const lead = full.traffic?.queue || full.scene?.following;
   const hazard = full.scene?.hazard;
   const hasTraffic =
@@ -107,12 +115,15 @@ export function prepareJevRequest(full) {
       hasTraffic
         ? "Follow queues without passing; close to 2m before stopping. Rear/oncoming/adjacent traffic alone is no reason to brake."
         : "",
-      intersection
+      intersection && !escape
         ? "Approach the line; stop 0.5m before it. Green or completed stop: proceed when your path is clear."
         : "",
       pursuer && !["escaped", "caught"].includes(pursuer.status)
-        ? "A pursuer is chasing you: escape with faster forward vectors up to the ceiling; do not stop or slow for it."
+        ? pursuer.gap_m != null && pursuer.gap_m < 20
+          ? "URGENT: pursuer under 20m — avoid being hit first: fastest forward vector up to the ceiling plus a lane offset to break contact. Nothing else matters until the gap grows."
+          : "A pursuer is chasing you: escape with faster forward vectors up to the ceiling; gap under 200m means over the limit, closer means faster; do not stop or slow for it."
         : "",
+      voiceSpec ? voiceSpec.instruction : "",
     ]
       .filter(Boolean)
       .join(" "),
@@ -204,6 +215,7 @@ export function prepareJevRequest(full) {
         : {}),
       status: pursuer.status,
     };
+  if (voiceSpec) state.voice_command = voiceCmd;
   if (lead)
     state.following = {
       id: lead.lead_id ?? lead.id,

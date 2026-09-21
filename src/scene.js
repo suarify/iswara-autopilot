@@ -855,6 +855,26 @@ export class DriveScene {
       }),
     );
     this.scene.add(this.sensorCone);
+    // Floating warning marker over the nearest hunter.
+    const mark = document.createElement("canvas");
+    mark.width = mark.height = 128;
+    const ctx = mark.getContext("2d");
+    ctx.fillStyle = "#e82127";
+    ctx.beginPath();
+    ctx.arc(64, 64, 52, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 72px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("!", 64, 68);
+    const markTex = new THREE.CanvasTexture(mark);
+    this.chaseMarker = new THREE.Sprite(
+      new THREE.SpriteMaterial({ map: markTex, depthTest: false, transparent: true }),
+    );
+    this.chaseMarker.renderOrder = 50;
+    this.chaseMarker.visible = false;
+    this.scene.add(this.chaseMarker);
     this.impacts = new CrashEffects(this.scene);
     this.vectors = new RoadVectors(this.scene, this.vectorLayer);
     this.renderer.shadowMap.needsUpdate = true;
@@ -1068,6 +1088,18 @@ export class DriveScene {
         m.position.set(p.x, 0, p.z);
         m.rotation.y = -p.heading;
       }
+    }
+    // Hunter marker: floats over the nearest chaser, pulses faster close.
+    const hunter = this.sim.activeChaser?.() ?? null;
+    const showMark =
+      !!hunter && !this.sim.caught && !this.sim.escaped && !this.sim.crash;
+    this.chaseMarker.visible = showMark;
+    if (showMark) {
+      const gap = this.sim.pursuerGap();
+      this.chaseMarker.position.set(hunter.x, 3.1, hunter.z);
+      const pulse = 1.25 + 0.35 * Math.sin(this.sim.time * (gap < 15 ? 10 : 5));
+      this.chaseMarker.scale.set(pulse, pulse, 1);
+      this.chaseMarker.material.opacity = gap > 60 ? 0.55 : 1;
     }
     for (const p of this.sim.pedestrians) {
       const m = this.people.get(p.id);
