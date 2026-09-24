@@ -4,6 +4,7 @@ import { materials } from "./materials.js";
 import { rng } from "./math.js";
 import { assetManager } from "./asset-loading.js";
 import { renderProfile } from "./render-profile.js";
+const BASE = import.meta.env.BASE_URL;
 
 const assets = new Map();
 function loadAsset(name, file) {
@@ -11,7 +12,7 @@ function loadAsset(name, file) {
     assets.set(
       name,
       new GLTFLoader(assetManager)
-        .loadAsync(`/models/${name}/${file}.glb`)
+        .loadAsync(`${BASE}models/${name}/${file}.glb`)
         .then(({ scene }) => {
           scene.updateMatrixWorld(true);
           const bounds = new THREE.Box3().setFromObject(scene),
