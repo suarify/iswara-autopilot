@@ -40,3 +40,9 @@ Timer `src/main.js:1773`, checkered finish `src/scene.js:793`, violations modal 
 Upload `dist/` to GitHub Pages / Netlify / Cloudflare Pages. No functions. See `docs/hosting.md`.
 
 Asset credits in `public/`.
+
+## Attribution
+
+Original **JevPilot** by [StandardAgents](https://github.com/standardagents/jevpilot) (https://jevpilot.standardagents.ai) — Tesla Autopilot-like demo using [Jev by TypeSafe AI](https://typesafe.ai/). Upstream MIT-style assets, traffic GLB fleet and world simulation by the original authors.
+
+This fork **Kancil Autopilot** (`suarify/kancil-autopilot`) is a pure-frontend static adaptation maintained by **Suarify** — adds `Satria` hero/traffic (`public/models/model-y/satria.glb` `src/model-assets.js:82`), race timer + checkered finish (`src/main.js:1773` `src/scene.js:793`), 3-violations dialog (`src/main.js:1795`), 2-line `MYVI GANG` banner (`src/main.js:1759`), and client-side Jev direct (`src/jev-client.js:70` `src/main.js:1957`). Original credits preserved; upstream remains at `standardagents/jevpilot`.
