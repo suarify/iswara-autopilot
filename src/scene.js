@@ -785,7 +785,14 @@ export class DriveScene {
     const route = this.sim.world.route.points;
     this.destination = new THREE.Group();
     const end = route.at(-1);
+    const prev = route.at(-2) || end;
     this.destination.position.set(end.x, 0.2, end.z);
+    // Align finish line across the road
+    try {
+      const dx = end.x - prev.x, dz = end.z - prev.z;
+      const h = Math.atan2(dx, -dz);
+      this.destination.rotation.y = -h;
+    } catch {}
     const ring = new THREE.Mesh(
       new THREE.TorusGeometry(2, 0.13, 8, 48),
       mat("#edfda2"),
@@ -794,6 +801,46 @@ export class DriveScene {
     this.destination.add(ring);
     const pole = cyl(this.destination, 0.055, 5, 0, 2.5, 0, "#e4f6b3");
     const flag = box(this.destination, 1.8, 1.1, 0.06, 0.85, 4.5, 0, "#dff293");
+    // Checkered finish line across the road
+    {
+      const size = 24, div = 8;
+      const c = document.createElement("canvas");
+      c.width = c.height = 128;
+      const ctx = c.getContext("2d");
+      for (let y = 0; y < div; y++) for (let x = 0; x < div; x++) {
+        ctx.fillStyle = (x + y) % 2 === 0 ? "#ffffff" : "#111111";
+        ctx.fillRect((x * 128) / div, (y * 128) / div, 128 / div, 128 / div);
+      }
+      ctx.strokeStyle = "#0d9488"; ctx.lineWidth = 4; ctx.strokeRect(0, 0, 128, 128);
+      const tex = new THREE.CanvasTexture(c);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(1, 1);
+      const finishMat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.5 });
+      const finish = new THREE.Mesh(new THREE.PlaneGeometry(size, 3), finishMat);
+      finish.rotation.x = -Math.PI / 2;
+      finish.position.set(0, -0.14, 0);
+      finish.receiveShadow = true;
+      this.destination.add(finish);
+      // Arch poles to emphasize gate
+      for (const sx of [-size / 2 + 0.15, size / 2 - 0.15]) {
+        const archPole = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 3.2, 8), mat("#e82127"));
+        archPole.position.set(sx, 1.4, 0);
+        this.destination.add(archPole);
+      }
+      const bannerGeo = new THREE.PlaneGeometry(10, 1.4);
+      const bCanvas = document.createElement("canvas");
+      bCanvas.width = 512; bCanvas.height = 128;
+      const bctx = bCanvas.getContext("2d");
+      bctx.fillStyle = "#0d9488"; bctx.fillRect(0, 0, 512, 128);
+      bctx.fillStyle = "#ffffff"; bctx.font = "bold 48px sans-serif"; bctx.textAlign = "center"; bctx.textBaseline = "middle";
+      bctx.fillText("FINISH", 256, 64);
+      const bTex = new THREE.CanvasTexture(bCanvas);
+      bTex.colorSpace = THREE.SRGBColorSpace;
+      const bannerMesh = new THREE.Mesh(bannerGeo, new THREE.MeshBasicMaterial({ map: bTex, side: THREE.DoubleSide, transparent: true }));
+      bannerMesh.position.set(0, 3.4, 0);
+      this.destination.add(bannerMesh);
+    }
     this.scene.add(this.destination);
     this.player = carModel("#e2e5e9");
     this.heroCar = null;

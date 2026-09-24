@@ -84,6 +84,7 @@ export const TRAFFIC_MODELS = {
   myvi: { file: "/models/model-y/myvi.glb", flip: Math.PI },
   tank: { file: "/models/model-y/tank.glb", flip: Math.PI },
   bezza: { file: "/models/model-y/bezzabrown.glb", flip: 0 },
+  satria: { file: "/models/model-y/satria.glb", flip: Math.PI },
 };
 const trafficAssets = new Map();
 
@@ -123,6 +124,7 @@ export const HERO_MODELS = [
   { id: "yellow-myvi", label: "Myvi Yellow", file: "/models/model-y/yellow-myvi.glb", flip: Math.PI },
   { id: "red-kancil", label: "Kancil Red", file: "/models/model-y/redkancil.glb", flip: 0, size: 0.75 },
   { id: "white-myvi", label: "Myvi White", file: "/models/model-y/myvi-model-y-white-red.glb", flip: Math.PI },
+  { id: "satria", label: "Satria", file: "/models/model-y/satria.glb", flip: Math.PI },
 ];
 
 // Rigged builder for the original Model Y / Tesla asset. Throws when the

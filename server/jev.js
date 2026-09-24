@@ -5,157 +5,77 @@ import {
   stopAvailability,
 } from "../src/planning.js";
 import { prepareJevRequest, expandJevAnswers } from "../src/jev-request.js";
+import {
+  validState,
+  questions,
+  evaluateBrain,
+  DEFAULT_ENDPOINT,
+} from "../src/jev-client.js";
 
-export function validState(state) {
-  if (
-    !Number.isFinite(state?.speed_mps) ||
-    !Number.isFinite(state?.speed_ceiling_mps) ||
-    state.speed_ceiling_mps < 0 ||
-    state.speed_ceiling_mps > 28 ||
-    !/^b[0-9]+$/.test(state.batch_id) ||
-    typeof state.road?.on_road !== "boolean" ||
-    typeof state.recovery?.active !== "boolean" ||
-    !state.vectors ||
-    !state.turn
-  )
-    return false;
-  const entries = Object.entries(state.vectors);
-  return (
-    entries.length > 0 &&
-    entries.length <= CANDIDATE_COUNT &&
-    entries.every(
-      ([id, v]) =>
-        v &&
-        id.startsWith(`${state.batch_id}_`) &&
-        /^[a-zA-Z0-9_]+$/.test(id) &&
-        (v.lane_offset_m === null ||
-          (Number.isFinite(v.lane_offset_m) &&
-            Math.abs(v.lane_offset_m) <= 1.4 &&
-            Number.isFinite(v.lookahead_m) &&
-            v.lookahead_m >= 2 &&
-            v.lookahead_m <= 10)) &&
-        Number.isFinite(v.steering) &&
-        Math.abs(v.steering) <= 0.85 &&
-        Number.isFinite(v.velocity_mps) &&
-        (v.stop_at_line == null ||
-          (Number.isFinite(v.lane_offset_m) &&
-            ["x", "z", "heading", "clearance_m", "deceleration_mps2"].every(
-              (key) => Number.isFinite(v.stop_at_line[key]),
-            ) &&
-            v.stop_at_line.clearance_m === 0.5 &&
-            v.stop_at_line.deceleration_mps2 >= 4 &&
-            v.stop_at_line.deceleration_mps2 <= 4.8)) &&
-        v.velocity_mps >= (state.recovery.active ? -2 : 0) &&
-        Math.abs(v.velocity_mps) <= state.speed_ceiling_mps + 0.001 &&
-        typeof v.collision_predicted === "boolean" &&
-        typeof v.stays_on_road === "boolean" &&
-        Number.isFinite(v.route_error_m) &&
-        Number.isFinite(v.offroad_fraction),
-    ) &&
-    (!stopAvailability(state).available ||
-      entries.some(([, v]) => v.velocity_mps === 0))
-  );
+export { validState, questions };
+// Custom brain endpoint comes from a request header (local Vite dev only).
+// Allow-any mode: any http(s) URL is accepted. Credentials in the URL are
+// still rejected. Cross-site abuse is contained by the Origin check in
+// jevMiddleware below (same-host origin required).
+export const DEFAULT_ALLOWED_BRAIN_HOSTS = [];
+
+export function parseAllowedBrainHosts(env = {}) {
+  const raw = env.JEV_ALLOWED_BRAIN_HOSTS;
+  if (!raw || typeof raw !== "string") return [];
+  return raw
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
 }
 
-export function questions(state) {
-  return prepareJevRequest(state).request.questions;
+export function brainHostAllowed() {
+  return true;
 }
-export async function evaluate(state, env, signal, onUsage, apiKey) {
-  if (!validState(state)) {
-    const error = new Error(
-      "A valid driving observation and candidate batch are required.",
-    );
-    error.status = 400;
-    throw error;
+
+export function resolveBrainEndpoint(raw) {
+  if (!raw) return null;
+  if (typeof raw !== "string" || raw.length > 500) return "invalid";
+  let url;
+  try {
+    url = new URL(raw.trim());
+  } catch {
+    return "invalid";
   }
-  // A key pasted into the frontend (x-jev-key header) wins for this call;
-  // otherwise the server-wide TYPESAFE_API_KEY applies. The key is only
-  // ever forwarded to api.typesafe.ai, never logged or echoed back.
-  const key = apiKey || env.TYPESAFE_API_KEY;
-  const start = performance.now();
-  const prepared = prepareJevRequest(state);
-  const requestQuestions = prepared.request.questions;
-  const body = JSON.stringify(prepared.request);
-  const apiCall = Object.keys(requestQuestions).length > 0;
-  let data = { answers: {}, usage: { input_tokens: 0, output_tokens: 0 } };
-  if (apiCall) {
-    if (!key) {
-      const error = new Error(
-        "No Jev API key. Enter one in the frontend or set TYPESAFE_API_KEY in .env.",
-      );
-      error.status = 503;
-      throw error;
-    }
-    const res = await fetch("https://api.typesafe.ai/v1/systemone", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${key}`,
-        "Content-Type": "application/json",
-      },
-      body,
-      signal: signal || AbortSignal.timeout(10000),
-    });
-    if (!res.ok) {
-      const error = new Error(
-        res.status === 401
-          ? "Jev rejected the API key — please check your key."
-          : res.status === 429
-            ? "Jev rate limit reached. Pausing before retry."
-            : `Jev API returned HTTP ${res.status}.`,
-      );
-      error.status = res.status;
-      error.billable = res.status >= 500;
-      throw error;
-    }
-    data = await res.json();
-  }
-  // Account for paid responses even when their decision later fails validation.
-  if (onUsage) await onUsage(data.usage);
-  const a = expandJevAnswers(prepared, data.answers);
-  const selection = decisionSelection(state, a);
-  if (
-    !selection ||
-    !Number.isFinite(data.usage?.input_tokens) ||
-    !Number.isFinite(data.usage?.output_tokens)
-  )
-    throw new Error("Jev returned an incomplete decision.");
-  if (
-    requestQuestions.route &&
-    !Object.hasOwn(requestQuestions.route.criteria, a.route?.choice)
-  )
-    throw new Error("Jev returned an invalid route choice.");
-  const selected = state.vectors[selection.choice];
-  if (
-    (selected.collision_imminent ?? selected.collision_predicted) &&
-    selected.velocity_mps !== 0
-  )
-    throw new Error(
-      "Jev selected a path with an imminent collision. Braking before retry.",
-    );
-  const inputPrice = Number(env.JEV_INPUT_PRICE ?? 0.042),
-    outputPrice = Number(env.JEV_OUTPUT_PRICE ?? 0);
-  return {
-    model: data.model ?? null,
-    decision_source: apiCall ? "jev" : "only_eligible_action",
-    request_bytes: apiCall ? Buffer.byteLength(body) : 0,
-    candidate_ids: prepared.aliases,
-    resolved_single_choices: Object.keys(prepared.fixed),
-    answers: a,
-    selection,
-    batch_id: state.batch_id,
-    controls: { steering: selected.steering, velocity: selected.velocity_mps },
-    usage: data.usage,
-    latency_ms: Math.round(performance.now() - start),
-    cost_usd:
-      (data.usage.input_tokens * inputPrice +
-        data.usage.output_tokens * outputPrice) /
-      1e6,
-    pricing: {
-      input_per_million: inputPrice,
-      output_per_million: outputPrice,
-      source: "https://typesafe.ai/blog/introducing-system-one-models-and-jev",
-    },
-  };
+  if (url.username || url.password) return "invalid";
+  if (url.protocol !== "http:" && url.protocol !== "https:") return "invalid";
+  if (!url.hostname) return "invalid";
+  return url.toString();
+}
+
+export function resolveBrainModel(raw) {
+  if (!raw) return null;
+  if (typeof raw !== "string") return "invalid";
+  const name = raw.trim().slice(0, 64);
+  return name || null;
+}
+
+export async function evaluate(
+  state,
+  env,
+  signal,
+  onUsage,
+  apiKey,
+  brainEndpoint,
+  brainModel,
+) {
+  // Shared browser-safe core; the server only adds env pricing/defaults.
+  // Lenient usage stays scoped to self-hosted brains (hosted billing
+  // still requires valid usage via onUsage).
+  return evaluateBrain(state, {
+    apiKey: apiKey || env.TYPESAFE_API_KEY,
+    endpoint: brainEndpoint || DEFAULT_ENDPOINT,
+    model: brainModel || "jev-latest",
+    inputPrice: Number(env.JEV_INPUT_PRICE ?? 0.042),
+    outputPrice: Number(env.JEV_OUTPUT_PRICE ?? 0),
+    signal,
+    onUsage,
+    lenientUsage: !!brainEndpoint,
+  });
 }
 export function jevMiddleware(env) {
   // Mounted only by Vite dev/preview. The deployed Worker always requires login.
@@ -189,12 +109,20 @@ export function jevMiddleware(env) {
       return send(404, { error: "Not found" });
     if (req.method !== "POST") return send(404, { error: "Not found" });
     // Local dev accepts a per-browser key via the x-jev-key header so no
-    // .env edit is needed; it falls back to the server-wide key.
+    // .env edit is needed; it falls back to the server-wide key. A custom
+    // self-hosted brain rides x-jev-endpoint (localhost only) + x-jev-model.
     const headerKey = req.headers["x-jev-key"];
     const clientKey =
       typeof headerKey === "string" && headerKey.length <= 200
         ? headerKey.trim() || null
         : null;
+    const brainEndpoint = resolveBrainEndpoint(req.headers["x-jev-endpoint"]);
+    const brainModel = resolveBrainModel(req.headers["x-jev-model"]);
+    if (brainEndpoint === "invalid" || brainModel === "invalid")
+      return send(400, {
+        error:
+          "Bad brain override. Endpoint must be an http(s) URL, model a short name.",
+      });
     if (
       req.headers.origin &&
       req.headers.origin !== `http://${req.headers.host}` &&
@@ -204,12 +132,14 @@ export function jevMiddleware(env) {
     if (path === "/api/key-check") {
       // Cheap auth probe: an empty payload is rejected for its shape (400)
       // when the key is fine, and with 401 only when the key is bad.
-      // Never echoes the key back.
+      // Probes the overridden brain when one is given. Never echoes keys.
       const key = clientKey || env.TYPESAFE_API_KEY;
+      const endpoint =
+        brainEndpoint || "https://api.typesafe.ai/v1/systemone";
       if (!key)
         return send(200, { ok: false, error: "No key provided." });
       try {
-        const probe = await fetch("https://api.typesafe.ai/v1/systemone", {
+        const probe = await fetch(endpoint, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${key}`,
@@ -221,7 +151,7 @@ export function jevMiddleware(env) {
         if (probe.status === 401)
           return send(200, {
             ok: false,
-            error: "TypeSafe rejected this key (401). Check for typos or grab a fresh one.",
+            error: "That endpoint rejected this key (401). Check for typos or grab a fresh one.",
           });
         return send(200, { ok: true });
       } catch (e) {
@@ -229,12 +159,12 @@ export function jevMiddleware(env) {
           ok: false,
           error:
             e.name === "TimeoutError"
-              ? "TypeSafe timed out — try again."
-              : "Could not reach TypeSafe.",
+              ? "Endpoint timed out — is it running?"
+              : "Could not reach that endpoint.",
         });
       }
     }
-    if (!env.TYPESAFE_API_KEY && !clientKey)
+    if (!env.TYPESAFE_API_KEY && !clientKey && !brainEndpoint)
       return send(503, {
         error:
           "No Jev API key. Tap the key button and paste yours, or set TYPESAFE_API_KEY in .env and restart.",
@@ -257,7 +187,15 @@ export function jevMiddleware(env) {
           error:
             "A valid driving observation and candidate batch are required.",
         });
-      const result = await evaluate(state, env, undefined, undefined, clientKey);
+      const result = await evaluate(
+        state,
+        env,
+        undefined,
+        undefined,
+        clientKey,
+        brainEndpoint,
+        brainModel,
+      );
       send(200, result);
     } catch (e) {
       send(e.status || 502, {

@@ -131,8 +131,7 @@ test("local decisions accept a per-browser key without any server key", async (t
   assert(!JSON.stringify(await response.json()).includes("browser-pasted-key"));
 });
 
-test("key-check probes TypeSafe without echoing the key", async (t) => {
-  const origin = await localServer(t);
+test("key-check probes TypeSafe without echoing the key", async (t) => {  const origin = await localServer(t);
   const clientFetch = globalThis.fetch;
   t.mock.method(globalThis, "fetch", async (url, options) => {
     if (url !== "https://api.typesafe.ai/v1/systemone")
@@ -153,7 +152,7 @@ test("key-check probes TypeSafe without echoing the key", async (t) => {
   assert.deepEqual(await probe("probe-key"), {
     ok: false,
     error:
-      "TypeSafe rejected this key (401). Check for typos or grab a fresh one.",
+      "That endpoint rejected this key (401). Check for typos or grab a fresh one.",
   });
   assert.deepEqual(await probe(null), { ok: false, error: "No key provided." });
 });
@@ -184,4 +183,65 @@ test("local requests reach Jev without a session and preserve rejected-key error
   });
   assert.equal(crossOrigin.status, 403);
   assert.equal(upstreamCalls, 1);
+});
+
+test("custom brains forward to localhost with the model name", async (t) => {
+  const origin = await localServer(t);
+  const clientFetch = globalThis.fetch;
+  let seen = null;
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    if (typeof url !== "string" || !url.startsWith("http://localhost:8081/"))
+      return clientFetch(url, options);
+    seen = { url, body: JSON.parse(options.body) };
+    return new Response("", { status: 401 });
+  });
+  const response = await clientFetch(`${origin}/api/decide`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: origin,
+      "x-jev-key": "local-key",
+      "x-jev-endpoint": "http://localhost:8081/v1/drive",
+      "x-jev-model": "laya-v1",
+    },
+    body: JSON.stringify({ state: new Simulation(42).decisionState() }),
+  });
+  assert.equal(response.status, 401);
+  assert.equal(seen.url, "http://localhost:8081/v1/drive");
+  assert.equal(seen.body.model, "laya-v1");
+});
+
+test("any http(s) brain endpoint is accepted, malformed ones rejected", async (t) => {
+  const origin = await localServer(t, { TYPESAFE_API_KEY: "k" });
+  for (const endpoint of [
+    "https://evil.example/steal",
+    "http://169.254.169.254/",
+    "https://districts-packets-grade-newton.trycloudflare.com/v1/systemone",
+  ]) {
+    const response = await fetch(`${origin}/api/decide`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: origin,
+        "x-jev-endpoint": endpoint,
+      },
+      body: "{}",
+    });
+    // Allow-any mode: valid URLs pass brain validation (they fail later on
+    // state shape, never on "Bad brain override").
+    const data = await response.json();
+    assert.equal(/Bad brain override/.test(data.error || ""), false, endpoint);
+  }
+  for (const endpoint of ["not a url", "ftp://host/x", "https://user:pass@host/"]) {
+    const response = await fetch(`${origin}/api/decide`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: origin,
+        "x-jev-endpoint": endpoint,
+      },
+      body: "{}",
+    });
+    assert.equal(response.status, 400, endpoint);
+  }
 });

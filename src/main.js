@@ -28,6 +28,7 @@ import {
   Key,
   Mic,
   Music,
+  Brain,
 } from "lucide";
 import { Simulation } from "./simulation.js";
 import { BackgroundPlanner } from "./background-planner.js";
@@ -46,6 +47,7 @@ import { THEMES } from "./world.js";
 import { candidateName, decisionControls } from "./planning.js";
 import { clamp, nearestOnPath } from "./math.js";
 import { parseVoiceAlternatives, voiceGrammarSrc, VOICE_COMMANDS } from "./voice.js";
+import { evaluateBrain } from "./jev-client.js";
 import * as THREE from "three";
 import { HERO_MODELS, loadHeroCar } from "./model-assets.js";
 const icons = {
@@ -76,6 +78,7 @@ const icons = {
   Key,
   Mic,
   Music,
+  Brain,
 };
 const icon = (name) => `<i data-lucide="${name}"></i>`,
   $ = (id) => document.getElementById(id);
@@ -129,14 +132,17 @@ $("app").innerHTML = `
 <header class="topbar glass"><a href="/" class="brand" aria-label="Kancil Autopilot"><img class="brand-mark" src="/logokancil.jpg" alt=""/><b>Kancil Autopilot</b></a><div class="world-picker"><select id="world-select" aria-label="World environment"><option value="city">Skyline City</option><option value="town">Small town</option><option value="highway">Interstate 08</option></select><button id="new-world" title="Refresh world" aria-label="Refresh world">${icon("rotate-cw")}</button><a id="github-link" href="https://github.com/standardagents/jevpilot" target="_blank" rel="noopener noreferrer" aria-label="View JevPilot on GitHub (opens in a new tab)" title="View on GitHub">${icon("github")}</a></div></header>
 <div class="navigation-hud"><div class="navigation-card glass"><span id="turn-icon">${icon("arrow-up")}</span><div><strong id="next-maneuver">Continue straight</strong><span id="turn-distance"></span></div><span class="nav-divider"></span><span id="remaining"></span><button id="map-toggle" aria-label="Toggle route map" aria-pressed="true" title="Hide route map">${icon("map")}</button></div>
 <div id="minimap" class="minimap glass"><div class="minimap-toolbar" role="toolbar" aria-label="Minimap controls"><button id="map-drag" aria-label="Move minimap" title="Move minimap · drag or use arrow keys">${icon("grip")}</button><div><button id="map-zoom-out" aria-label="Zoom out" title="Zoom out">${icon("minus")}</button><button id="map-zoom-in" aria-label="Zoom in" title="Zoom in">${icon("plus")}</button><button id="map-reset" aria-label="Reset minimap" title="Reset map position, zoom and following">${icon("rotate-ccw")}</button></div></div><canvas id="map-canvas" width="380" height="310" aria-label="Route map. Drag to pan, scroll to zoom, double-click to follow the car."></canvas></div></div>
+<div id="race-timer" class="race-timer glass" aria-live="polite" aria-label="Race time"><span class="race-timer-icon">⏱</span><strong id="race-time">0.0s</strong></div>
 <div id="paused-overlay" hidden><div class="glass"><span>${icon("pause")} Paused</span><button id="resume" class="primary">Resume driving</button></div></div>
 <div id="chase-banner" hidden></div>
 <div id="arrival" class="arrival glass" hidden><span class="arrival-mark">${icon("flag")}</span><span class="eyebrow">DESTINATION REACHED</span><h1>You made it.</h1><p id="arrival-summary"></p><button id="next-trip" class="primary">Next drive ${icon("arrow-up-right")}</button><button id="keep-driving" class="subtle">Keep exploring</button></div>
 <div id="intro-overlay" hidden><div class="intro-card glass"><img class="intro-logo" src="/logokancil.jpg" alt="Teal Kancil" /><span class="eyebrow">KANCIL AUTOPILOT</span><h1>Outrun the Myvi gang.</h1><p>Reach the destination flag before the Myvi, Wira and Tesla hunters tag you. Tagged? You get 3 seconds — then they're back on you. Don't bang anything: saman is expensive.</p><canvas id="car-preview" width="520" height="300" aria-label="Preview of your car. Drag to spin it around."></canvas><div class="car-picker"><button id="car-prev" aria-label="Previous car">‹</button><strong id="car-name">Myvi Stripy</strong><button id="car-next" aria-label="Next car">›</button></div><div id="car-dots" class="car-dots"></div><div class="intro-actions"><button id="voice-intro" class="subtle" aria-label="Voice command">${icon("mic")} Voice</button><button id="start-drive" class="primary">Start drive</button></div><p class="intro-keys">WASD drive · J autopilot · drag the car to spin it</p></div></div>
-<div class="bottom-hud"><div class="driver-dock glass"><div class="speed-cluster"><div title="Current speed"><strong id="speed">0</strong><span>km/h</span></div><span class="speed-limit" title="Speed limit"><small>LIMIT</small><b id="speed-limit">50</b></span></div><span class="dock-divider"></span><div class="pilot-actions"><button id="autopilot" class="pilot-button" role="switch" aria-checked="false" aria-label="Jev autopilot" title="Engage Jev · J">${icon("sparkles")}<span id="pilot-label">Engage Jev</span><kbd>J</kbd></button><button id="candidates-toggle" class="candidate-button" aria-label="Show steering candidates" aria-pressed="false" title="Show steering candidates"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 20V3m-3 3 3-3 3 3M12 20C12 14 7 12 3 8m0 3V8h3M12 20c0-6 5-8 9-12m-3 0h3v3"/><circle cx="12" cy="21" r="1" fill="currentColor" stroke="none"/></svg></button></div><div id="decision-status"><span id="pilot-state">Free play</span><span id="context-message">WASD to drive · Space to brake</span><span id="jev-ms" class="jev-ms" title="Last Jev decision round-trip"></span><span class="cost-total" title="Estimated cost from Jev-reported token usage and configured pricing."><span id="cost-label">Session</span> <strong id="cost">$0.000000</strong></span></div><span class="dock-divider"></span><div class="dock-tools" role="group" aria-label="View and driving controls"><button id="camera" title="Change camera · C" aria-label="Change camera">${icon("video")}<span id="camera-name">Chase</span></button><button id="scene-json" aria-label="Inspect live JSON" title="Inspect live JSON">${icon("braces")}</button><button id="fullscreen" aria-label="Enter fullscreen" title="Fullscreen">${icon("maximize")}</button><span class="divider"></span><button id="music" aria-label="Background music" title="Kompang Cruise on/off">${icon("music")}</button><button id="voice" aria-label="Voice command" title="Voice: faster, slower, left, right, U-turn">${icon("mic")}</button><button id="jev-key" aria-label="Jev API key" title="Add your Jev key">${icon("key")}</button><button id="pause" aria-label="Pause simulation" title="Pause · P">${icon("pause")}</button><button id="sign-out" hidden aria-label="Sign out" title="Sign out">${icon("log-out")}</button></div></div></div>
+<div class="bottom-hud"><div class="driver-dock glass"><div class="speed-cluster"><div title="Current speed"><strong id="speed">0</strong><span>km/h</span></div><span class="speed-limit" title="Speed limit"><small>LIMIT</small><b id="speed-limit">50</b></span></div><span class="dock-divider"></span><div class="pilot-actions"><button id="autopilot" class="pilot-button" role="switch" aria-checked="false" aria-label="Jev autopilot" title="Engage Jev · J">${icon("sparkles")}<span id="pilot-label">Engage Jev</span><kbd>J</kbd></button><button id="candidates-toggle" class="candidate-button" aria-label="Show steering candidates" aria-pressed="false" title="Show steering candidates"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 20V3m-3 3 3-3 3 3M12 20C12 14 7 12 3 8m0 3V8h3M12 20c0-6 5-8 9-12m-3 0h3v3"/><circle cx="12" cy="21" r="1" fill="currentColor" stroke="none"/></svg></button></div><div id="decision-status"><span id="pilot-state">Free play</span><span id="context-message">WASD to drive · Space to brake</span><span id="jev-ms" class="jev-ms" title="Last Jev decision round-trip"></span><span class="cost-total" title="Estimated cost from Jev-reported token usage and configured pricing."><span id="cost-label">Session</span> <strong id="cost">$0.000000</strong></span></div><span class="dock-divider"></span><div class="dock-tools" role="group" aria-label="View and driving controls"><button id="camera" title="Change camera · C" aria-label="Change camera">${icon("video")}<span id="camera-name">Chase</span></button><button id="scene-json" aria-label="Inspect live JSON" title="Inspect live JSON">${icon("braces")}</button><button id="fullscreen" aria-label="Enter fullscreen" title="Fullscreen">${icon("maximize")}</button><span class="divider"></span><button id="music" aria-label="Background music" title="Kompang Cruise on/off">${icon("music")}</button><button id="brain" aria-label="AI driver" title="Choose which model drives">${icon("brain")}</button><button id="voice" aria-label="Voice command" title="Voice: faster, slower, left, right, U-turn">${icon("mic")}</button><button id="jev-key" aria-label="Jev API key" title="Add your Jev key">${icon("key")}</button><button id="pause" aria-label="Pause simulation" title="Pause · P">${icon("pause")}</button><button id="sign-out" hidden aria-label="Sign out" title="Sign out">${icon("log-out")}</button></div></div></div>
 <dialog id="crash-dialog" aria-labelledby="crash-title" aria-describedby="crash-description"><span class="crash-symbol">${icon("x")}</span><span class="eyebrow">DRIVE ENDED</span><h1 id="crash-title">Game over.</h1><p id="crash-description"></p><div class="crash-stats"><div><strong id="crash-speed"></strong><span>km/h at impact</span></div><div><strong id="crash-distance"></strong><span>meters driven</span></div></div><button id="retry-drive" class="primary">${icon("rotate-ccw")} Restart drive</button><button id="crash-new-world" class="secondary">Try a new world ${icon("arrow-up-right")}</button></dialog>
-<dialog id="credit-dialog" aria-labelledby="credit-title"><span class="eyebrow">THANKS FOR TAKING A DRIVE</span><h2 id="credit-title">That's your free lap.</h2><p>Your $0.25 of Jev play credit has been used. You can keep exploring with manual controls.</p><button id="credit-close" class="primary">Keep driving manually</button><a href="https://standardagents.ai/" target="_blank" rel="noopener noreferrer">Explore Standard Agents ↗</a></dialog>
+ <dialog id="violations-dialog" aria-labelledby="violations-title"><button id="violations-close" class="dialog-close" aria-label="Close">${icon("x")}</button><span class="eyebrow">SAMAN REPORT</span><h2 id="violations-title">Violations</h2><div id="violations-body"></div><p id="violations-time" class="violations-time"></p><button id="violations-ok" class="primary" style="margin-top:16px">Close</button></dialog>
+ <dialog id="credit-dialog" aria-labelledby="credit-title"><span class="eyebrow">THANKS FOR TAKING A DRIVE</span><h2 id="credit-title">That's your free lap.</h2><p>Your $0.25 of Jev play credit has been used. You can keep exploring with manual controls.</p><button id="credit-close" class="primary">Keep driving manually</button><a href="https://standardagents.ai/" target="_blank" rel="noopener noreferrer">Explore Standard Agents ↗</a></dialog>
 <dialog id="key-dialog" aria-labelledby="key-title"><span class="eyebrow">JEV AUTOPILOT KEY</span><h2 id="key-title">Use your own Jev key.</h2><p>Paste a <a href="https://typesafe.ai/" target="_blank" rel="noopener noreferrer">TypeSafe AI</a> key to engage autopilot. It stays in this browser and is only sent to this server with drive requests — never displayed or logged.</p><input id="jev-key-input" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your TypeSafe AI key" aria-label="TypeSafe AI key" /><p id="jev-key-status" class="key-status" aria-live="polite"></p><div class="dialog-actions"><button id="key-save" class="primary">Save key</button><button id="key-test" class="secondary">Test</button><button id="key-clear" class="subtle">Remove</button><button id="key-close" class="subtle">Close</button></div></dialog>
+<dialog id="brain-dialog" aria-labelledby="brain-title"><button id="brain-close-x" class="dialog-close" aria-label="Close">${icon("x")}</button><span class="eyebrow">WHO DRIVES</span><h2 id="brain-title">Pick your driver.</h2><p>Jev by default, or point at your own self-hosted brain (Laya, Kev, …) — any http(s) URL. The name shows in the game while it drives.</p><input id="brain-name" autocomplete="off" spellcheck="false" placeholder="Display name — e.g. Laya" aria-label="Driver display name" /><input id="brain-url" autocomplete="off" spellcheck="false" placeholder="Base URL — e.g. http://localhost:8080/v1/drive" aria-label="Driver base URL" /><input id="brain-model" autocomplete="off" spellcheck="false" placeholder="Model name — e.g. laya-v1 (optional)" aria-label="Model name" /><input id="brain-key" type="password" autocomplete="off" spellcheck="false" placeholder="Key for this brain (optional)" aria-label="Brain key" /><label class="brain-direct"><input id="brain-direct" type="checkbox" checked /> Call straight from this browser (no proxy)</label><p id="brain-status" class="key-status" aria-live="polite"></p><div class="dialog-actions"><button id="brain-save" class="primary">Save driver</button><button id="brain-test" class="secondary">Test</button><button id="brain-close" class="subtle">Close</button></div><div id="brain-list" class="brain-list"></div></dialog>
 <div id="toast" role="status" hidden></div>
 <dialog id="json-dialog"><div class="json-header"><div>${icon("braces")}<strong>Under the hood</strong><span id="json-live">LIVE · 4 Hz</span></div><button id="close-json" aria-label="Close JSON inspector">${icon("x")}</button></div><div class="json-toolbar"><div class="json-tabs"><button data-tab="request" class="active">Jev input</button><button data-tab="sensor">Perception</button><button data-tab="world">Full world</button><button data-tab="decision">Response</button><button data-tab="voice">Voice</button></div><div class="json-actions"><button id="freeze-json">Freeze</button><button id="copy-json" aria-label="Copy displayed JSON">${icon("copy")} <span id="copy-json-label" aria-live="polite">Copy</span></button><button id="download-json">${icon("download")} Download</button></div></div><p id="json-description">Exact Jev API payload, including instructions and offered choices. Full geometry and control details stay local.</p><pre id="json-content"></pre></dialog>
 <dialog id="help-dialog"><button id="close-help" class="dialog-close" aria-label="Close help">${icon("x")}</button><span class="eyebrow">YOUR NEXT DRIVE</span><h2>Take the wheel.</h2><p class="touch-help">Use the thumbstick to steer. Push up to accelerate, pull down to brake and reverse. Release to coast; hold Brake to stop.</p><div class="help-keys"><span><kbd>W / ↑</kbd> Hold accelerator</span><span><kbd>S / ↓</kbd> Brake / reverse</span><span><kbd>A / D</kbd> Steer</span><span><kbd>SPACE</kbd> Brake</span><span><kbd>J</kbd> Jev autopilot</span><span><kbd>C</kbd> Camera</span><span><kbd>P</kbd> Pause</span><span><kbd>?</kbd> Keyboard help</span></div><p>Drag the scene to orbit in Chase or Bird’s eye; drag to look around in Driver view. Scroll to zoom outside; double-click to recenter. Tap A/D for small corrections; hold for a sharper turn and release to recenter. Hold W to accelerate; release to coast with drag. S brakes, then reverses once stopped. Space applies the brake. Autopilot sets target speed directly.</p><p>The bright blue line is Jev's selected three-second plan. Use Candidates to see the sampled paths: forward in blue/cyan, reverse in purple, lane departures in amber, and predicted collisions in orange. Choice probabilities are available in the JSON inspector. The safety brake can reduce speed for a missed hazard; interventions are shown beside the autopilot button.</p><p class="asset-credits">Vehicle: <a href="https://sketchfab.com/3d-models/tesla-model-y-2021-c0a86cac582d4b33aba0fb1b1912d970" target="_blank" rel="noreferrer">Tesla Model Y 2021</a> by 763468712, <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer">CC BY 4.0</a>. Geometry adapted by Tina 3D Tesla; optimized, re-materialed, and wheel-rigged for JevPilot. Tree, shrub, streetlight, surface textures and sky: <a href="https://polyhaven.com" target="_blank" rel="noreferrer">Poly Haven</a>, CC0.</p><p>Driving keys take back control. Use the JSON button for live inputs, full world state, probabilities, and session telemetry.</p></dialog>`;
@@ -310,8 +316,8 @@ function refreshWorld() {
 function syncPilot() {
   const on = sim.autopilot;
   $("autopilot").setAttribute("aria-checked", String(on));
-  $("pilot-label").textContent = on ? "Jev engaged" : "Engage Jev";
-  tooltips.set($("autopilot"), `${on ? "Disengage" : "Engage"} Jev · J`);
+  $("pilot-label").textContent = on ? `${brainLabel()} engaged` : "Engage Jev";
+  tooltips.set($("autopilot"), `${on ? "Disengage" : "Engage"} ${brainLabel()} · J`);
   $("autopilot").disabled = !!sim.crash;
   document.body.classList.toggle("piloting", on);
   touch.sync();
@@ -324,7 +330,7 @@ function setPilot(on) {
     $("credit-dialog").showModal();
     return;
   }
-  if (on && !configured && !hasJevKey()) {
+  if (on && !configured && !hasJevKey() && !activeBrain()) {
     toast("Add your Jev key to engage autopilot.", "error");
     openKeyDialog();
     return;
@@ -1022,6 +1028,247 @@ $("key-test").onclick = async () => {
     $("jev-key-status").textContent = "Could not reach the server.";
   }
 };
+// ---- Custom brains: Jev vs Laya vs Kev vs … (localhost only) ----
+const BRAIN_STORAGE = "kancil.brains";
+const BRAIN_ACTIVE_STORAGE = "kancil.brain_active";
+function loadBrains() {
+  try {
+    const raw = localStorage.getItem(BRAIN_STORAGE);
+    const list = raw ? JSON.parse(raw) : [];
+    return Array.isArray(list) ? list.filter((b) => b && b.id) : [];
+  } catch {
+    return [];
+  }
+}
+function saveBrains(list) {
+  try {
+    localStorage.setItem(BRAIN_STORAGE, JSON.stringify(list));
+  } catch {
+    /* ignore */
+  }
+}
+const getBrainId = () => {
+  try {
+    return localStorage.getItem(BRAIN_ACTIVE_STORAGE) || "jev";
+  } catch {
+    return "jev";
+  }
+};
+const activeBrain = () =>
+  loadBrains().find((b) => b.id === getBrainId()) ?? null;
+const brainLabel = () => activeBrain()?.name || "Jev";
+function setActiveBrain(id) {
+  try {
+    localStorage.setItem(BRAIN_ACTIVE_STORAGE, id);
+  } catch {
+    /* ignore */
+  }
+  refreshBrainButton();
+  syncPilot();
+}
+function refreshBrainButton() {
+  const button = $("brain");
+  if (!button) return;
+  button.hidden = authRequired;
+  tooltips.set(
+    button,
+    activeBrain()
+      ? `Driver: ${brainLabel()} · tap to change`
+      : "Driver: Jev · tap to add your own",
+  );
+  button.classList.toggle("custom", !!activeBrain());
+}
+function fillBrainForm(brain) {
+  if (!brain) {
+    $("brain-name").value = "";
+    $("brain-url").value = "";
+    $("brain-model").value = "";
+    $("brain-key").value = "";
+    return;
+  }
+  $("brain-name").value = brain.name || "";
+  $("brain-url").value = brain.baseUrl || "";
+  $("brain-model").value = brain.model || "";
+  $("brain-key").value = brain.key || "";
+  if (brain.direct !== undefined) $("brain-direct").checked = !!brain.direct;
+}
+function openViolationsDialog() {
+  const body = $("violations-body"), timeEl = $("violations-time");
+  const total = sim.time;
+  const mm = Math.floor(total / 60), ss = (total % 60).toFixed(1).padStart(4, "0");
+  const timeStr = `${String(mm).padStart(2, "0")}:${ss}`;
+  const vioEvents = sim.events.filter((e) => /missed stop|red|violation/i.test(e.text)).slice(0, 10);
+  if (body) {
+    if (!sim.violations) body.innerHTML = `<p style="color:var(--muted)">No violations — clean drive!</p>`;
+    else if (!vioEvents.length) body.innerHTML = `<p>${sim.violations} violation${sim.violations !== 1 ? "s" : ""} recorded.</p>`;
+    else body.innerHTML = `<ul style="text-align:left;margin:0;padding-left:18px;line-height:1.7">${vioEvents.map((e) => `<li><strong>${e.time.toFixed(1)}s</strong> — ${e.text}</li>`).join("")}</ul>` + (sim.events.length > vioEvents.length ? `<p style="margin-top:10px;font-size:11px;color:var(--muted)">Showing violations only.</p>` : "");
+  }
+  if (timeEl) timeEl.textContent = `Total time: ${timeStr} · ${Math.round(sim.distance)} m · ${sim.collisions} contacts`;
+  $("violations-dialog").showModal();
+}
+function renderBrainList() {
+  const list = $("brain-list");
+  list.innerHTML = "";
+  const brains = loadBrains(),
+    activeId = getBrainId();
+  const row = (id, name, sub, onUse, onDelete) => {
+    const div = document.createElement("div");
+    div.className = "brain-row" + (id === activeId ? " active" : "");
+    const label = document.createElement("button");
+    label.className = "brain-name";
+    label.innerHTML = "";
+    label.append(
+      Object.assign(document.createElement("strong"), { textContent: name }),
+      document.createElement("br"),
+      Object.assign(document.createElement("small"), { textContent: sub }),
+    );
+    label.onclick = onUse;
+    div.append(label);
+    if (onDelete) {
+      const del = document.createElement("button");
+      del.className = "subtle";
+      del.textContent = "Remove";
+      del.onclick = (e) => { e.stopPropagation(); onDelete(); };
+      div.append(del);
+    }
+    list.append(div);
+  };
+  row("jev", "Jev", "Default TypeSafe driver", () => {
+    setActiveBrain("jev");
+    fillBrainForm(null);
+    $("brain-status").textContent = "Jev selected — default driver.";
+    renderBrainList();
+  });
+  for (const b of brains)
+    row(
+      b.id,
+      b.name,
+      `${b.model || b.name} · ${b.baseUrl}${b.direct ? " · direct" : ""}`,
+      () => {
+        setActiveBrain(b.id);
+        fillBrainForm(b);
+        $("brain-status").textContent = `${b.name} selected and filled below — edit then Save to update.`;
+        renderBrainList();
+      },
+      () => {
+        saveBrains(loadBrains().filter((o) => o.id !== b.id));
+        if (getBrainId() === b.id) setActiveBrain("jev");
+        renderBrainList();
+      },
+    );
+}
+function openBrainDialog() {
+  renderBrainList();
+  $("brain-status").textContent = "";
+  $("brain-dialog").showModal();
+}
+$("brain").onclick = () => openBrainDialog();
+$("brain-close").onclick = () => $("brain-dialog").close();
+$("brain-close-x")?.addEventListener("click", () => $("brain-dialog").close());
+$("violations-close")?.addEventListener("click", () => $("violations-dialog").close());
+$("violations-ok")?.addEventListener("click", () => $("violations-dialog").close());
+$("brain-save").onclick = () => {
+  const name = $("brain-name").value.trim(),
+    baseUrl = $("brain-url").value.trim(),
+    model = $("brain-model").value.trim(),
+    key = $("brain-key").value.trim();
+  if (!name || !baseUrl) {
+    $("brain-status").textContent = "Give it a name and a base URL.";
+    return;
+  }
+  let parsed = null;
+  try {
+    parsed = new URL(baseUrl);
+  } catch {
+    parsed = null;
+  }
+  if (
+    !parsed ||
+    (parsed.protocol !== "http:" && parsed.protocol !== "https:") ||
+    !parsed.hostname
+  ) {
+    $("brain-status").textContent =
+      "Base URL must be an http(s) URL, e.g. http://localhost:8080/v1/drive or https://xxx.trycloudflare.com/v1/systemone.";
+    return;
+  }
+  const brains = loadBrains();
+  const id = `brain-${Date.now().toString(36)}`;
+  brains.push({
+    id,
+    name,
+    baseUrl,
+    model: model || name,
+    key,
+    direct: $("brain-direct").checked,
+  });
+  saveBrains(brains);
+  setActiveBrain(id);
+  $("brain-name").value = $("brain-url").value = $("brain-model").value = $("brain-key").value = "";
+  renderBrainList();
+  $("brain-status").textContent = `${name} saved and selected.`;
+};
+$("brain-test").onclick = async () => {
+  const baseUrl = $("brain-url").value.trim() || activeBrain()?.baseUrl || "";
+  const key = $("brain-key").value.trim() || activeBrain()?.key || getJevKey() || "";
+  if (!baseUrl) {
+    $("brain-status").textContent = "Enter a base URL first, then Test.";
+    return;
+  }
+  const direct =
+    $("brain-direct").checked || /^https:\/\//i.test(baseUrl);
+  $("brain-status").textContent = direct ? "Probing direct…" : "Probing…";
+  // Direct brains (required for https tunnels) must be reachable from this
+  // browser with CORS enabled; the proxy probe would 400/mislead instead.
+  if (direct) {
+    try {
+      const res = await fetch(baseUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(key ? { Authorization: `Bearer ${key}` } : {}),
+        },
+        body: "{}",
+        signal: AbortSignal.timeout(15000),
+      });
+      if (res.status === 401) {
+        $("brain-status").textContent =
+          "Endpoint answered but rejected this key (401). Check the key.";
+        return;
+      }
+      $("brain-status").textContent = res.ok
+        ? "Endpoint answered — save it and press J."
+        : `Endpoint answered HTTP ${res.status} — save it and press J.`;
+      return;
+    } catch (e) {
+      if (e instanceof TypeError) {
+        $("brain-status").textContent =
+          "Direct fetch blocked (CORS/network). Enable CORS for this origin on the brain, or uncheck Direct to use the localhost proxy.";
+        return;
+      }
+      $("brain-status").textContent = "Could not reach that endpoint.";
+      return;
+    }
+  }
+  try {
+    const res = await fetch("/api/key-check", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        "x-jev-endpoint": baseUrl,
+        ...(key ? { "x-jev-key": key } : {}),
+      },
+      body: "{}",
+      signal: AbortSignal.timeout(15000),
+    });
+    const data = await res.json();
+    $("brain-status").textContent = data.ok
+      ? "Endpoint answered — save it and press J."
+      : data.error || "Probe failed.";
+  } catch {
+    $("brain-status").textContent = "Could not reach the server.";
+  }
+};
 $("sign-out").onclick = async () => {
   setPilot(false);
   sim.paused = true;
@@ -1183,41 +1430,108 @@ async function decide() {
     const { state, plan } = planned;
     scene.vectors.setCandidates(plan);
     lastInput = inspectRequest(state);
-    const res = await fetch("/api/decide", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: {
-          "Content-Type": "application/json",
-          ...(getJevKey() ? { "x-jev-key": getJevKey() } : {}),
-        },
-        body: JSON.stringify({ state, request_id: crypto.randomUUID() }),
-        signal: AbortSignal.timeout(12000),
-      }),
-      data = await res.json();
+    const brain = activeBrain(),
+      brainKey = brain?.key || getJevKey();
+    let data = null,
+      res = null;
+    // Pure-client path: call the brain straight from this browser, no
+    // proxy involved. Falls back to the server proxy on network/CORS
+    // failure; other errors (bad key, bad payload) surface directly.
+    if (brain?.direct) {
+      try {
+        data = await evaluateBrain(state, {
+          apiKey: brainKey,
+          endpoint: brain.baseUrl,
+          model: brain.model || brain.name,
+          lenientUsage: true,
+          signal: AbortSignal.timeout(12000),
+        });
+        data.direct = true;
+      } catch (error) {
+        if (error instanceof TypeError) {
+          toast("Direct brain unreachable — using server proxy.", "error");
+        } else throw error;
+      }
+    }
+    if (!data) {
+      try {
+        res = await fetch("/api/decide", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: {
+            "Content-Type": "application/json",
+            ...(brainKey ? { "x-jev-key": brainKey } : {}),
+            ...(brain
+              ? {
+                  "x-jev-endpoint": brain.baseUrl,
+                  "x-jev-model": brain.model || brain.name,
+                }
+              : {}),
+          },
+          body: JSON.stringify({ state, request_id: crypto.randomUUID() }),
+          signal: AbortSignal.timeout(12000),
+        });
+        data = await res.json();
+        // Static hosting returns 404 for /api/* — fall back to direct browser call.
+        if (!res.ok && res.status === 404 && !authRequired) {
+          if (!(brainKey || getJevKey()) && !brain) throw new Error("No key for direct brain call.");
+          toast("No server — calling Jev directly from this browser.", "error");
+          data = await evaluateBrain(state, {
+            apiKey: brainKey || getJevKey(),
+            endpoint: brain?.baseUrl || "https://api.typesafe.ai/v1/systemone",
+            model: brain?.model || brain?.name || "jev-latest",
+            lenientUsage: true,
+            signal: AbortSignal.timeout(12000),
+          });
+          data.direct = true;
+          res = null;
+        }
+      } catch (error) {
+        // Network failure on static host (or proxy unreachable) — try direct.
+        if (
+          error instanceof TypeError &&
+          !authRequired &&
+          (brainKey || getJevKey() || brain)
+        ) {
+          toast("Server unreachable — trying direct brain from this browser.", "error");
+          data = await evaluateBrain(state, {
+            apiKey: brainKey || getJevKey(),
+            endpoint: brain?.baseUrl || "https://api.typesafe.ai/v1/systemone",
+            model: brain?.model || brain?.name || "jev-latest",
+            lenientUsage: true,
+            signal: AbortSignal.timeout(12000),
+          });
+          data.direct = true;
+          res = null;
+        } else throw error;
+      }
+    }
     updateCredits(data.credits);
-    if (res.status === 401 && authRequired) {
-      setPilot(false);
-      location.assign("/login");
-      return;
+    if (res) {
+      if (res.status === 401 && authRequired) {
+        setPilot(false);
+        location.assign("/login");
+        return;
+      }
+      if (res.status === 402 && authRequired) {
+        setPilot(false);
+        $("credit-dialog").showModal();
+        return;
+      }
+      if (res.status === 503 && !authRequired && !hasJevKey()) {
+        setPilot(false);
+        toast(data.error || "Add your Jev key to drive with autopilot.", "error");
+        openKeyDialog();
+        return;
+      }
+      if (res.status === 401 && !authRequired && hasJevKey()) {
+        setPilot(false);
+        toast("Jev rejected the saved key. Check it and try again.", "error");
+        openKeyDialog();
+        return;
+      }
+      if (!res.ok) throw Error(data.error || "Jev request failed");
     }
-    if (res.status === 402 && authRequired) {
-      setPilot(false);
-      $("credit-dialog").showModal();
-      return;
-    }
-    if (res.status === 503 && !authRequired && !hasJevKey()) {
-      setPilot(false);
-      toast(data.error || "Add your Jev key to drive with autopilot.", "error");
-      openKeyDialog();
-      return;
-    }
-    if (res.status === 401 && !authRequired && hasJevKey()) {
-      setPilot(false);
-      toast("Jev rejected the saved key. Check it and try again.", "error");
-      openKeyDialog();
-      return;
-    }
-    if (!res.ok) throw Error(data.error || "Jev request failed");
     if (data.decision_source === "only_eligible_action")
       tally.constrained_steps++;
     else tally.calls++;
@@ -1515,14 +1829,30 @@ function updateUI() {
       const who = hunter.label ?? hunter.model ?? "chaser",
         survive = gapM < 20;
       banner.hidden = false;
-      banner.textContent = survive
-        ? `🏃 BREAK-THE-RULES MODE · ${who} ${gapM} m`
-        : `⚠ ${who} ${gapM} m behind`;
+      if (survive) {
+        banner.innerHTML = `<span class="chase-line chase-line-1">🏃 MYVI GANG CHASING — ${gapM} m</span><span class="chase-line chase-line-2">BREAK THE RULES TO SURVIVE!</span>`;
+        banner.classList.add("chase-multiline");
+      } else {
+        banner.textContent = `⚠ ${who} ${gapM} m behind`;
+        banner.classList.remove("chase-multiline");
+      }
       banner.classList.toggle("critical", survive || gapM < 15);
-      // The nearer, the more solid the warning.
       banner.style.opacity = String(
         survive ? 1 : 0.45 + 0.55 * (1 - gapM / 60),
       );
+    }
+  }
+  // Race timer — visible during drive, freezes at finish
+  {
+    const rt = $("race-time"), wrap = $("race-timer");
+    if (rt && wrap) {
+      const t = sim.time;
+      const mm = Math.floor(t / 60);
+      const ss = (t % 60).toFixed(1).padStart(4, "0");
+      rt.textContent = `${String(mm).padStart(2, "0")}:${ss}`;
+      wrap.hidden = false;
+      wrap.style.opacity = sim.complete ? "0.95" : "1";
+      wrap.classList.toggle("race-done", !!sim.complete);
     }
   }
   $("cost").textContent = playCredits
@@ -1534,8 +1864,16 @@ function updateUI() {
       : "";
   if (sim.complete && !sim.freeExplore) {
     $("arrival").hidden = false;
-    $("arrival-summary").textContent =
-      `${Math.round(sim.distance)} m driven · ${sim.collisions} contacts · ${sim.violations} violations`;
+    const summary = $("arrival-summary");
+    const total = sim.time;
+    const mmT = Math.floor(total / 60);
+    const ssT = (total % 60).toFixed(1).padStart(4, "0");
+    const timeStr = `${String(mmT).padStart(2, "0")}:${ssT}`;
+    const violations = sim.violations;
+    const vioClass = violations >= 3 ? "violations-bad" : violations > 0 ? "violations-warn" : "violations-good";
+    summary.innerHTML = `<span>${Math.round(sim.distance)} m · ${sim.collisions} contacts · </span><button id="violations-link" class="violations-link ${vioClass}" aria-label="View violations">${violations} violation${violations !== 1 ? "s" : ""}</button><span> · ⏱ ${timeStr}</span>`;
+    const link = $("violations-link");
+    if (link) link.onclick = () => openViolationsDialog();
     if ($("autopilot").getAttribute("aria-checked") === "true") {
       generation++;
       syncPilot();
@@ -1642,6 +1980,7 @@ fetch("/api/status", { credentials: "same-origin" })
     if (data.user) tooltips.set($("sign-out"), `Sign out · ${data.user.email}`);
     configured = data.configured || (!authRequired && hasJevKey());
     refreshKeyButton();
+    refreshBrainButton();
     updateCostTooltip(data.pricing);
     if (!configured && !authRequired) {
       toast("Add your Jev key (key button) or set it on the server.", "error");
@@ -1650,7 +1989,17 @@ fetch("/api/status", { credentials: "same-origin" })
       toast("Jev API key is missing. Check the server configuration.", "error");
   })
   .catch(() => {
-    toast("Jev server unavailable.", "error");
+    // Static hosting: no /api/* . Switch to fully client-side mode.
+    authRequired = false;
+    configured = hasJevKey() || !!activeBrain();
+    const so = $("sign-out");
+    if (so) so.hidden = true;
+    refreshKeyButton();
+    refreshBrainButton();
+    updateCostTooltip({ input_per_million: 0.042, output_per_million: 0 });
+    toast(
+      "Static mode: manual driving is ready. Add your Jev key or a direct brain URL to enable autopilot with no server.",
+    );
   });
 
 export { sim, scene };
