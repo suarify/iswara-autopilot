@@ -83,7 +83,8 @@ export const TRAFFIC_MODELS = {
   tesla: { file: `${BASE}models/model-y/tesla.glb`, flip: 0 },
   wira: { file: `${BASE}models/model-y/wira.glb`, flip: Math.PI },
   myvi: { file: `${BASE}models/model-y/myvi.glb`, flip: Math.PI },
-  "yellow-myvi": { file: `${BASE}models/model-y/yellow-myvi.glb`, flip: Math.PI },
+  "yellow-myvi": { file: `${BASE}models/model-y/yellow-myvi.glb`, flip: 0, size: 0.75 },
+  "red-kancil": { file: `${BASE}models/model-y/redkancil.glb`, flip: 0, size: 0.75 },
   tank: { file: `${BASE}models/model-y/tank.glb`, flip: Math.PI },
   bezza: { file: `${BASE}models/model-y/bezzabrown.glb`, flip: 0 },
   satria: { file: `${BASE}models/model-y/satria.glb`, flip: 0 },
@@ -101,7 +102,7 @@ export async function loadTrafficCar(name) {
         const loader = new GLTFLoader(assetManager).setDRACOLoader(decoder);
         try {
           const { scene } = await loader.loadAsync(spec.file);
-          return normalizeModel(scene, spec.flip, `traffic-${name}`);
+          return normalizeModel(scene, spec.flip, `traffic-${name}`, spec.size ?? 1);
         } finally {
           decoder.dispose();
         }
@@ -123,7 +124,7 @@ export const HERO_MODELS = [
   { id: "tank", label: "Tank", file: `${BASE}models/model-y/tank.glb`, flip: Math.PI },
   { id: "red-myvi", label: "Myvi Red", file: `${BASE}models/model-y/myvi.glb`, flip: Math.PI },
   { id: "bezza", label: "Bezza Brown", file: `${BASE}models/model-y/bezzabrown.glb`, flip: Math.PI },
-  { id: "yellow-myvi", label: "Myvi Yellow", file: `${BASE}models/model-y/yellow-myvi.glb`, flip: Math.PI },
+  { id: "yellow-myvi", label: "Myvi Yellow", file: `${BASE}models/model-y/yellow-myvi.glb`, flip: 0, size: 0.75 },
   { id: "red-kancil", label: "Kancil Red", file: `${BASE}models/model-y/redkancil.glb`, flip: 0, size: 0.75 },
   { id: "white-myvi", label: "Myvi White", file: `${BASE}models/model-y/myvi-model-y-white-red.glb`, flip: Math.PI },
   { id: "satria", label: "Satria", file: `${BASE}models/model-y/satria.glb`, flip: 0 },

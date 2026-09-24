@@ -273,6 +273,7 @@ export class Simulation {
     { model: "tesla", label: "Tesla", back_m: 34, side_m: -2.5, color: "#e1e4e8", extra_mps: 4, top_mps: 5 },
     { model: "yellow-myvi", label: "Myvi Yellow", back_m: 41, side_m: 2.5, color: "#e0c020", extra_mps: 3.2, top_mps: 3.5 },
     { model: "satria", label: "Satria", back_m: 47, side_m: -2.5, color: "#30343b", extra_mps: 3.4, top_mps: 4.2 },
+    { model: "red-kancil", label: "Kancil Red", back_m: 53, side_m: 0, color: "#c81e2a", extra_mps: 3.6, top_mps: 4.6 },
   ];
   spawnChaser() {
     this.chasers = [];
