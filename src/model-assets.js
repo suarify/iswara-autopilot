@@ -86,6 +86,7 @@ export const TRAFFIC_MODELS = {
   tank: { file: `${BASE}models/model-y/tank.glb`, flip: Math.PI },
   bezza: { file: `${BASE}models/model-y/bezzabrown.glb`, flip: 0 },
   satria: { file: `${BASE}models/model-y/satria.glb`, flip: 0 },
+  "yellow-myvi": { file: `${BASE}models/model-y/yellow-myvi.glb`, flip: Math.PI },
 };
 const trafficAssets = new Map();
 

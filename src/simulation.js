@@ -263,14 +263,15 @@ export class Simulation {
     if (existing) Object.assign(existing, v);
     else this.traffic.push(v);
   }
-  // Chase pack: Myvi, Wira and Tesla start behind the player and hunt it
-  // with direct pursuit. They have no route (route-bound helpers must skip
-  // them); perception and collision-proximity helpers are position-based
-  // and handle them. Tesla is the fastest, Wira the slowest.
+  // Chase pack: Myvi, Wira, Tesla + Yellow Myvi + Satria hunting from behind.
+  // Direct pursuit, no route; perception and collision helpers are position-based.
+  // Tesla fastest, Wira slowest; Yellow and Satria in the back line.
   static CHASE_PACK = [
     { model: "myvi", label: "Myvi", back_m: 20, side_m: 0, color: "#c02020", extra_mps: 3.5, top_mps: 4 },
     { model: "wira", label: "Wira", back_m: 27, side_m: 2.5, color: "#2050c0", extra_mps: 3, top_mps: 3 },
     { model: "tesla", label: "Tesla", back_m: 34, side_m: -2.5, color: "#e1e4e8", extra_mps: 4, top_mps: 5 },
+    { model: "yellow-myvi", label: "Myvi Yellow", back_m: 41, side_m: 1.8, color: "#e6c300", extra_mps: 3.3, top_mps: 3.8 },
+    { model: "satria", label: "Satria", back_m: 48, side_m: -1.8, color: "#0d9488", extra_mps: 3.7, top_mps: 4.2 },
   ];
   spawnChaser() {
     this.chasers = [];
