@@ -8,6 +8,10 @@ https://github.com/user-attachments/assets/4baef58e-54ef-4d17-9982-353a0b6e6f45
   </a>
 </p>
 
+**Play now:** [GH Pages — suarify.github.io/kancil-autopilot](https://suarify.github.io/kancil-autopilot/) · [here.now — rustic-breeze-p5bt](https://rustic-breeze-p5bt.here.now/) · Upstream [jevpilot.standardagents.ai](https://jevpilot.standardagents.ai)
+
+> **Self-host brains (Kev / Laya):** local Jev alternatives at **[suarify/jev-kev-laya-selfhost](https://github.com/suarify/jev-kev-laya-selfhost)** — run `http://localhost:8080/v1/drive` (or your tunnel) and paste the URL in **Pick your driver** with **Call straight from this browser** checked. See that repo for Docker, CORS and model weights.
+
 Pure frontend driving playground — no server. Manual driving, Myvi/Wira/Tesla/Satria chase, race timer, finish gate, and optional Jev autopilot directly from the browser.
 
 ## Quick start (static)
@@ -27,7 +31,7 @@ No `.env`, no `wrangler`, no login. `J` toggles autopilot.
 
 Click the **key** icon, paste your [TypeSafe AI](https://typesafe.ai/) key (stored in `localStorage` only), or **Pick your driver** → paste a direct brain URL (e.g. `http://localhost:8080/v1/drive` or `https://api.typesafe.ai/v1/systemone`) with **Call straight from this browser** checked. The browser calls the brain directly — `src/jev-client.js:70` `evaluateBrain()` — no proxy.
 
-Direct brains need CORS for this origin.
+Direct brains need CORS for this origin. For local **Kev** / **Laya** self-host, see **[suarify/jev-kev-laya-selfhost](https://github.com/suarify/jev-kev-laya-selfhost)** — clone, `docker compose up`, expose via `cloudflared tunnel` if needed, then use the `https://*.trycloudflare.com/v1/drive` URL.
 
 ## How it works
 
