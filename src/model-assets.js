@@ -5,6 +5,7 @@ import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { materials, physical } from "./materials.js";
 import { steeringCurvature } from "./planning.js";
 import { assetManager } from "./asset-loading.js";
+const BASE = import.meta.env.BASE_URL;
 
 // Hero GLB cache lives in heroAssets (keyed by HERO_MODELS id) below.
 const WHEEL_NAMES = ["wheel_fl", "wheel_fr", "wheel_rl", "wheel_rr"];
@@ -79,12 +80,12 @@ function buildGenericHeroModel(scene) {
 // so no flip); wira/myvi/tank are single-mesh exports from the same pipeline
 // as the custom model-y.glb (face +X, need the PI flip).
 export const TRAFFIC_MODELS = {
-  tesla: { file: "/models/model-y/tesla.glb", flip: 0 },
-  wira: { file: "/models/model-y/wira.glb", flip: Math.PI },
-  myvi: { file: "/models/model-y/myvi.glb", flip: Math.PI },
-  tank: { file: "/models/model-y/tank.glb", flip: Math.PI },
-  bezza: { file: "/models/model-y/bezzabrown.glb", flip: 0 },
-  satria: { file: "/models/model-y/satria.glb", flip: 0 },
+  tesla: { file: `${BASE}models/model-y/tesla.glb`, flip: 0 },
+  wira: { file: `${BASE}models/model-y/wira.glb`, flip: Math.PI },
+  myvi: { file: `${BASE}models/model-y/myvi.glb`, flip: Math.PI },
+  tank: { file: `${BASE}models/model-y/tank.glb`, flip: Math.PI },
+  bezza: { file: `${BASE}models/model-y/bezzabrown.glb`, flip: 0 },
+  satria: { file: `${BASE}models/model-y/satria.glb`, flip: 0 },
 };
 const trafficAssets = new Map();
 
@@ -95,7 +96,7 @@ export async function loadTrafficCar(name) {
     trafficAssets.set(
       name,
       (async () => {
-        const decoder = new DRACOLoader(assetManager).setDecoderPath("/draco/");
+        const decoder = new DRACOLoader(assetManager).setDecoderPath(`${BASE}draco/`);
         const loader = new GLTFLoader(assetManager).setDRACOLoader(decoder);
         try {
           const { scene } = await loader.loadAsync(spec.file);
@@ -115,16 +116,16 @@ export async function loadTrafficCar(name) {
 }
 
 export const HERO_MODELS = [
-  { id: "tesla", label: "Tesla", file: "/models/model-y/tesla.glb", flip: 0, rigged: true },
-  { id: "stripe-myvi", label: "Kancil", file: "/models/model-y/model-y.glb", flip: 0, size: 0.75 },
-  { id: "wira", label: "Wira", file: "/models/model-y/wira.glb", flip: Math.PI },
-  { id: "tank", label: "Tank", file: "/models/model-y/tank.glb", flip: Math.PI },
-  { id: "red-myvi", label: "Myvi Red", file: "/models/model-y/myvi.glb", flip: Math.PI },
-  { id: "bezza", label: "Bezza Brown", file: "/models/model-y/bezzabrown.glb", flip: Math.PI },
-  { id: "yellow-myvi", label: "Myvi Yellow", file: "/models/model-y/yellow-myvi.glb", flip: Math.PI },
-  { id: "red-kancil", label: "Kancil Red", file: "/models/model-y/redkancil.glb", flip: 0, size: 0.75 },
-  { id: "white-myvi", label: "Myvi White", file: "/models/model-y/myvi-model-y-white-red.glb", flip: Math.PI },
-  { id: "satria", label: "Satria", file: "/models/model-y/satria.glb", flip: 0 },
+  { id: "tesla", label: "Tesla", file: `${BASE}models/model-y/tesla.glb`, flip: 0, rigged: true },
+  { id: "stripe-myvi", label: "Kancil", file: `${BASE}models/model-y/model-y.glb`, flip: 0, size: 0.75 },
+  { id: "wira", label: "Wira", file: `${BASE}models/model-y/wira.glb`, flip: Math.PI },
+  { id: "tank", label: "Tank", file: `${BASE}models/model-y/tank.glb`, flip: Math.PI },
+  { id: "red-myvi", label: "Myvi Red", file: `${BASE}models/model-y/myvi.glb`, flip: Math.PI },
+  { id: "bezza", label: "Bezza Brown", file: `${BASE}models/model-y/bezzabrown.glb`, flip: Math.PI },
+  { id: "yellow-myvi", label: "Myvi Yellow", file: `${BASE}models/model-y/yellow-myvi.glb`, flip: Math.PI },
+  { id: "red-kancil", label: "Kancil Red", file: `${BASE}models/model-y/redkancil.glb`, flip: 0, size: 0.75 },
+  { id: "white-myvi", label: "Myvi White", file: `${BASE}models/model-y/myvi-model-y-white-red.glb`, flip: Math.PI },
+  { id: "satria", label: "Satria", file: `${BASE}models/model-y/satria.glb`, flip: 0 },
 ];
 
 // Rigged builder for the original Model Y / Tesla asset. Throws when the
@@ -314,7 +315,7 @@ function cloneModel(template) {
 }
 
 async function loadHeroModel(spec) {
-  const decoder = new DRACOLoader(assetManager).setDecoderPath("/draco/");
+  const decoder = new DRACOLoader(assetManager).setDecoderPath(`${BASE}draco/`);
   const loader = new GLTFLoader(assetManager).setDRACOLoader(decoder);
   try {
     const { scene } = await loader.loadAsync(spec.file);

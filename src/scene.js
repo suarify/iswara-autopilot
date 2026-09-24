@@ -19,10 +19,11 @@ import { detailedCar } from "./vehicle-model.js";
 import { HDRLoader } from "three/addons/loaders/HDRLoader.js";
 import { assetManager, assetsReady } from "./asset-loading.js";
 import { renderProfile } from "./render-profile.js";
+const BASE = import.meta.env.BASE_URL;
 let daylight;
 function daylightEnvironment() {
   return (daylight ||= new HDRLoader(assetManager)
-    .loadAsync("/textures/daylight.hdr")
+    .loadAsync(`${BASE}textures/daylight.hdr`)
     .then((texture) => {
       texture.mapping = THREE.EquirectangularReflectionMapping;
       return texture;
