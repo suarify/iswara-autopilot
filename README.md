@@ -8,7 +8,7 @@ https://github.com/user-attachments/assets/4baef58e-54ef-4d17-9982-353a0b6e6f45
   </a>
 </p>
 
-**Play now:** [GH Pages — suarify.github.io/kancil-autopilot](https://suarify.github.io/kancil-autopilot/) · [here.now — rustic-breeze-p5bt](https://rustic-breeze-p5bt.here.now/) · Upstream [jevpilot.standardagents.ai](https://jevpilot.standardagents.ai)
+**Play now:** [GH Pages — suarify.github.io/iswara-autopilot](https://suarify.github.io/iswara-autopilot/) · [here.now — rustic-breeze-p5bt](https://rustic-breeze-p5bt.here.now/) · Upstream [jevpilot.standardagents.ai](https://jevpilot.standardagents.ai)
 
 > **Self-host brains (Kev / Laya):** local Jev alternatives at **[suarify/jev-kev-laya-selfhost](https://github.com/suarify/jev-kev-laya-selfhost)** — run `http://localhost:8080/v1/drive` (or your tunnel) and paste the URL in **Pick your driver** with **Call straight from this browser** checked. See that repo for Docker, CORS and model weights.
 
@@ -49,4 +49,4 @@ Asset credits in `public/`.
 
 Original **JevPilot** by [StandardAgents](https://github.com/standardagents/jevpilot) (https://jevpilot.standardagents.ai) — Tesla Autopilot-like demo using [Jev by TypeSafe AI](https://typesafe.ai/). Upstream MIT-style assets, traffic GLB fleet and world simulation by the original authors.
 
-This fork **Kancil Autopilot** (`suarify/kancil-autopilot`) is a pure-frontend static adaptation maintained by **Suarify** — adds `Satria` hero/traffic (`public/models/model-y/satria.glb` `src/model-assets.js:82`), race timer + checkered finish (`src/main.js:1773` `src/scene.js:793`), 3-violations dialog (`src/main.js:1795`), 2-line `MYVI GANG` banner (`src/main.js:1759`), and client-side Jev direct (`src/jev-client.js:70` `src/main.js:1957`). Original credits preserved; upstream remains at `standardagents/jevpilot`.
+This fork **Iswara Pilot** (`suarify/iswara-autopilot`) is a pure-frontend static adaptation maintained by **Suarify** — adds `Satria` hero/traffic (`public/models/model-y/satria.glb` `src/model-assets.js:82`), race timer + checkered finish (`src/main.js:1773` `src/scene.js:793`), 3-violations dialog (`src/main.js:1795`), 2-line `MYVI GANG` banner (`src/main.js:1759`), and client-side Jev direct (`src/jev-client.js:70` `src/main.js:1957`). Original credits preserved; upstream remains at `standardagents/jevpilot`.
