@@ -85,6 +85,7 @@ export const TRAFFIC_MODELS = {
   myvi: { file: `${BASE}models/model-y/myvi.glb`, flip: Math.PI },
   "yellow-myvi": { file: `${BASE}models/model-y/yellow-myvi.glb`, flip: 0, size: 0.75 },
   "red-kancil": { file: `${BASE}models/model-y/redkancil.glb`, flip: 0, size: 0.75 },
+  iswara: { file: `${BASE}models/model-y/iswara.glb`, flip: 0 },
   tank: { file: `${BASE}models/model-y/tank.glb`, flip: Math.PI },
   bezza: { file: `${BASE}models/model-y/bezzabrown.glb`, flip: 0 },
   satria: { file: `${BASE}models/model-y/satria.glb`, flip: 0 },
@@ -118,6 +119,7 @@ export async function loadTrafficCar(name) {
 }
 
 export const HERO_MODELS = [
+  { id: "iswara", label: "Iswara", file: `${BASE}models/model-y/iswara.glb`, flip: 0 },
   { id: "tesla", label: "Tesla", file: `${BASE}models/model-y/tesla.glb`, flip: 0, rigged: true },
   { id: "stripe-myvi", label: "Kancil", file: `${BASE}models/model-y/model-y.glb`, flip: 0, size: 0.75 },
   { id: "wira", label: "Wira", file: `${BASE}models/model-y/wira.glb`, flip: Math.PI },
@@ -339,10 +341,10 @@ async function loadHeroModel(spec) {
 
 const heroAssets = new Map();
 
-export async function loadHeroCar(id = "stripe-myvi") {
+export async function loadHeroCar(id = "iswara") {
   const spec =
     HERO_MODELS.find((m) => m.id === id) ??
-    HERO_MODELS.find((m) => m.id === "stripe-myvi");
+    HERO_MODELS.find((m) => m.id === "iswara");
   if (!heroAssets.has(spec.id))
     heroAssets.set(spec.id, loadHeroModel(spec));
   return cloneModel(await heroAssets.get(spec.id));

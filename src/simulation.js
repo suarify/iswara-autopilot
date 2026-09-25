@@ -81,6 +81,7 @@ export const DEFAULT_FLEET = [
   "bezza",
   "tank",
   "satria",
+  "iswara",
 ];
 
 export class Simulation {

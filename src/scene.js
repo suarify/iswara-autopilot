@@ -860,7 +860,7 @@ export class DriveScene {
         playerGroup.clear();
         playerGroup.add(model);
         this.heroCar = model;
-        this.heroModelId = "stripe-myvi";
+        this.heroModelId = "iswara";
         playerGroup.userData.sourcedModel = true;
         playerGroup.userData.eyeHeight = model.userData.eyeHeight;
         playerGroup.userData.eyeForward = model.userData.eyeForward;
