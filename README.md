@@ -1,10 +1,8 @@
 # Iswara Autopilot
 
-<video src="https://github.com/suarify/iswara-autopilot/releases/download/demo/iswara.mp4" controls preload="metadata" width="100%"></video>
+<video src="docs/compressed.mp4" controls preload="metadata" width="100%"></video>
 
 **Play now:** [GH Pages — suarify.github.io/iswara-autopilot](https://suarify.github.io/iswara-autopilot/) · [here.now — rustic-breeze-p5bt](https://rustic-breeze-p5bt.here.now/)
-
-> **Demo video:** `iswara.mp4` (188&nbsp;MB) is too big for git — publish it once as a release asset and the player above starts working, no code change needed: repo → **Releases** → **Draft a new release** → tag `demo` → attach `iswara.mp4` → **Publish**.
 
 Malaysian street-driving playground — pure frontend, no server. Take the wheel of the **Proton Iswara** (default hero) or ten more local heroes — Kancil, Wira, Myvi Red/Yellow/White, Satria, Bezza, Kancil Red, Tank, Tesla — on a night city circuit with traffic, signals, stop lines and a checkered finish.
 

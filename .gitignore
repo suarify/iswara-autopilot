@@ -1,7 +1,9 @@
 node_modules/
 dist/
-# Demo videos live on GitHub Releases (100MB push cap) — never commit .mp4.
+# Demo videos live on GitHub Releases (100MB push cap) — never commit raw .mp4.
+# Exception: the compressed in-repo demo (must stay under 100MB).
 *.mp4
+!docs/compressed.mp4
 .env*
 !.env.example
 .reference/
