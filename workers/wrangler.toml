@@ -1,0 +1,3 @@
+name = "jev-relay"
+main = "jev-relay.js"
+compatibility_date = "2026-10-01"

@@ -1,4 +1,4 @@
-# JevPilot — Kancil Autopilot (Pure Frontend)
+# Iswara Pilot — JevPilot fork (Pure Frontend)
 
 https://github.com/user-attachments/assets/4baef58e-54ef-4d17-9982-353a0b6e6f45
 
@@ -12,13 +12,14 @@ https://github.com/user-attachments/assets/4baef58e-54ef-4d17-9982-353a0b6e6f45
 
 > **Self-host brains (Kev / Laya):** local Jev alternatives at **[suarify/jev-kev-laya-selfhost](https://github.com/suarify/jev-kev-laya-selfhost)** — run `http://localhost:8080/v1/drive` (or your tunnel) and paste the URL in **Pick your driver** with **Call straight from this browser** checked. See that repo for Docker, CORS and model weights.
 
-Pure frontend driving playground — no server. Manual driving, Myvi/Wira/Tesla/Satria chase, race timer, finish gate, and optional Jev autopilot directly from the browser.
+Pure frontend driving playground — no server. Manual driving, Myvi/Wira/Tesla/Satria chase, race timer, finish gate, and optional autopilot (**Jev** or **OpenAI Decisions**) called straight from the browser tab.
 
 ## Quick start (static)
 
 ```sh
 npm ci
 npm run dev      # http://localhost:5173
+npm test         # node --test tests/*.test.js
 # build for any static host
 npm run build    # -> dist/
 npx serve dist -l 5000
@@ -27,21 +28,53 @@ npx serve dist -l 5000
 
 No `.env`, no `wrangler`, no login. `J` toggles autopilot.
 
-## Jev autopilot (optional, browser-direct)
+## Autopilot: bring your own key (Jev **or** OpenAI)
 
-Click the **key** icon, paste your [TypeSafe AI](https://typesafe.ai/) key (stored in `localStorage` only), or **Pick your driver** → paste a direct brain URL (e.g. `http://localhost:8080/v1/drive` or `https://api.typesafe.ai/v1/systemone`) with **Call straight from this browser** checked. The browser calls the brain directly — `src/jev-client.js:70` `evaluateBrain()` — no proxy.
+The **key** icon opens **Use your own key.** (`src/main.js:154`) with a provider switch:
 
-Direct brains need CORS for this origin. For local **Kev** / **Laya** self-host, see **[suarify/jev-kev-laya-selfhost](https://github.com/suarify/jev-kev-laya-selfhost)** — clone, `docker compose up`, expose via `cloudflared tunnel` if needed, then use the `https://*.trycloudflare.com/v1/drive` URL.
+| Provider | Endpoint | Model | Price used by the inspector |
+| --- | --- | --- | --- |
+| **Jev API (TypeSafe)** | `https://api.typesafe.ai/v1/systemone` (`src/jev-client.js:19`) | `jev-latest` | server pricing, `$0.042`/1M fallback in static mode |
+| **OpenAI Decisions API** | `https://api.openai.com/v1/decisions` (`src/openai-adapter.js:15`) | `gpt-6-luna` default, or any model you pick | **$0.10 / 1M input, $0 output** (`src/openai-adapter.js:18`) |
+
+- Keys stay in `localStorage` only — `jevpilot.jev_api_key`, `jevpilot.openai_api_key`, `jevpilot.openai_model`, `jevpilot.key_provider` — and are sent **only** to the provider you chose. Never to a proxy of ours.
+- **List models** (`src/main.js:1145`) calls `GET https://api.openai.com/v1/models` with your key (it doubles as the key check: 401/403 = bad key) and fills the model dropdown; decision-capable models float to the top.
+- The driving pipeline is unchanged. `src/openai-adapter.js` translates our local candidate-table questions into OpenAI's `{model, input, questions}` body (`buildOpenAIBody`) and folds the `answers` back into the same shape the planner scores (`fromOpenAIAnswers` — zero-fills missing options and clamps to a valid probability distribution, and only reports refusals for questions we actually asked).
+- `src/jev-client.js:81` `evaluateBrain()` picks the transport per provider; the inspector shows `decision_source: "openai"` (`src/jev-client.js:197`).
+- Static hosting has no `/api/*`, so decisions run directly from the tab (`src/main.js:1611`) — no proxy, no server round trip.
+
+**Direct brains:** **Pick your driver** → paste a brain URL (e.g. `http://localhost:8080/v1/drive` or `https://api.typesafe.ai/v1/systemone`) with **Call straight from this browser** checked. Direct brains need CORS for this origin. For local **Kev** / **Laya** self-host, see **[suarify/jev-kev-laya-selfhost](https://github.com/suarify/jev-kev-laya-selfhost)** — clone, `docker compose up`, expose via `cloudflared tunnel` if needed, then use the `https://*.trycloudflare.com/v1/drive` URL.
+
+**Jev relay (CORS workaround):** TypeSafe only allowlists `console.typesafe.ai`, so browsers elsewhere get `400 Disallowed CORS origin` on the preflight. Two relays bridge it — same request format, key still only in your browser:
+- **Dev:** `vite.config.js` proxies `/typesafe/*` → `api.typesafe.ai`; `npm run dev` uses it automatically (`VITE_JEV_ENDPOINT` overrides).
+- **Pages:** deploy `workers/jev-relay.js` once (`cd workers && npx wrangler login && npx wrangler deploy`), then build with `VITE_JEV_ENDPOINT=https://jev-relay.<you>.workers.dev/v1/systemone` (CI reads the repo variable `VITE_JEV_ENDPOINT`).
+
+## Tests
+
+```sh
+npm test   # node --test tests/*.test.js
+```
+
+Covers world generation, physics, collisions, chase/traffic behaviour, road recovery, voice commands, and both provider layers — `tests/jev-client.test.js` and `tests/openai-adapter.test.js` (Jev ↔ OpenAI request/response translation).
+
+Known red, all pre-existing and outside the autopilot path: `tests/auth.test.js` and `tests/jev.test.js` still import the removed `server/` modules (serverless refactor), plus 10 assertions in `chase` / `simulation` / `traffic-safety` / `road-recovery` that predate the current world build.
 
 ## How it works
 
-Compact candidate tables (eligible steering+speed vectors, road bounds, traffic, signals) are sampled locally (`src/planning.js`, `src/driving-plan.js`). Jev picks the vector; physics, collisions `src/collisions.js`, and 3D `src/scene.js` + `src/model-assets.js` (hero `Satria`/`Kancil`/`Myvi`/`Wira`/`Bezza`/`Tesla`, traffic fleet `src/simulation.js:76`) stay client-side.
+Compact candidate tables (eligible steering+speed vectors, road bounds, traffic, signals) are sampled locally (`src/planning.js`, `src/driving-plan.js`). The chosen provider picks the vector; physics, collisions `src/collisions.js`, and 3D `src/scene.js` + `src/model-assets.js` (heroes from `src/model-assets.js:121`, traffic fleet from `src/model-assets.js:82`, specs in `src/simulation.js`) stay client-side.
 
-Timer `src/main.js:1773`, checkered finish `src/scene.js:793`, violations modal `src/main.js:1795` and 2-line `MYVI GANG` banner `src/main.js:1759` are all frontend.
+Race timer `src/main.js:145`, checkered finish `src/scene.js:805`, violations dialog `src/main.js:1248` and 2-line `MYVI GANG` banner `src/main.js:2001` are all frontend.
 
 ## Deploy static
 
-Upload `dist/` to GitHub Pages / Netlify / Cloudflare Pages. No functions. See `docs/hosting.md`.
+Push to `main` — `.github/workflows/deploy.yml` runs `npm run build` and publishes `dist/` to the `gh-pages` branch. Or locally:
+
+```sh
+npm run build
+npx gh-pages -d dist
+```
+
+Netlify / Cloudflare Pages: build `npm run build`, publish `dist`. No functions. See `docs/hosting.md`.
 
 Asset credits in `public/`.
 
@@ -49,4 +82,4 @@ Asset credits in `public/`.
 
 Original **JevPilot** by [StandardAgents](https://github.com/standardagents/jevpilot) (https://jevpilot.standardagents.ai) — Tesla Autopilot-like demo using [Jev by TypeSafe AI](https://typesafe.ai/). Upstream MIT-style assets, traffic GLB fleet and world simulation by the original authors.
 
-This fork **Iswara Pilot** (`suarify/iswara-autopilot`) is a pure-frontend static adaptation maintained by **Suarify** — adds `Satria` hero/traffic (`public/models/model-y/satria.glb` `src/model-assets.js:82`), race timer + checkered finish (`src/main.js:1773` `src/scene.js:793`), 3-violations dialog (`src/main.js:1795`), 2-line `MYVI GANG` banner (`src/main.js:1759`), and client-side Jev direct (`src/jev-client.js:70` `src/main.js:1957`). Original credits preserved; upstream remains at `standardagents/jevpilot`.
+This fork **Iswara Pilot** (`suarify/iswara-autopilot`) is a pure-frontend static adaptation maintained by **Suarify** — adds the `Satria` hero/traffic car (`public/models/model-y/satria.glb`), race timer + checkered finish, the 3-violations dialog, the 2-line `MYVI GANG` banner, browser-direct Jev (`src/jev-client.js:81`), and the **OpenAI Decisions** provider (`src/openai-adapter.js`). Original credits preserved; upstream remains at `standardagents/jevpilot`.

@@ -6,8 +6,32 @@ import {
   stopAvailability,
 } from "./planning.js";
 import { prepareJevRequest, expandJevAnswers } from "./jev-request.js";
+import {
+  OPENAI_ENDPOINT,
+  OPENAI_DEFAULT_MODEL,
+  OPENAI_INPUT_PRICE,
+  OPENAI_OUTPUT_PRICE,
+  buildOpenAIBody,
+  fromOpenAIAnswers,
+  normalizeUsage,
+} from "./openai-adapter.js";
 
 export const DEFAULT_ENDPOINT = "https://api.typesafe.ai/v1/systemone";
+// Which Jev endpoint this browser calls. Direct TypeSafe URL by default;
+// VITE_JEV_ENDPOINT overrides it (dev defaults to the same-origin Vite
+// relay /typesafe/*, a Pages build points at the public relay worker) so
+// localhost and static hosting never trigger a CORS preflight.
+const viteEnv = (import.meta && import.meta.env) || {};
+export const JEV_ENDPOINT =
+  viteEnv.VITE_JEV_ENDPOINT ||
+  (viteEnv.DEV ? "/typesafe/v1/systemone" : DEFAULT_ENDPOINT);
+// The key check lives next to the decision endpoint: same base, /models path.
+export function jevModelsUrl(endpoint = JEV_ENDPOINT) {
+  return endpoint.replace(/\/systemone\/?$/, "/models");
+}
+// Free, key-only endpoint: 401 means the key is wrong, so it doubles as the
+// key check for the Jev provider without spending a decision.
+export const JEV_MODELS_URL = "https://api.typesafe.ai/v1/models";
 
 export function validState(state) {
   if (
@@ -65,8 +89,10 @@ export function questions(state) {
 }
 
 // Full decision round-trip against any compatible brain endpoint.
-// options: { apiKey, endpoint, model, inputPrice, outputPrice,
-//   signal, onUsage, lenientUsage }
+// options: { provider: "jev"|"openai", apiKey, endpoint, model,
+//   inputPrice, outputPrice, signal, onUsage, lenientUsage }
+// The openai provider speaks POST /v1/decisions; the request and response are
+// translated here so planning never sees a provider-specific shape.
 export async function evaluateBrain(state, options = {}) {
   if (!validState(state)) {
     const error = new Error(
@@ -75,12 +101,14 @@ export async function evaluateBrain(state, options = {}) {
     error.status = 400;
     throw error;
   }
+  const openai = options.provider === "openai";
+  const label = openai ? "OpenAI" : "Jev";
   const {
     apiKey = null,
-    endpoint = DEFAULT_ENDPOINT,
-    model = "jev-latest",
-    inputPrice = 0.042,
-    outputPrice = 0,
+    endpoint = openai ? OPENAI_ENDPOINT : JEV_ENDPOINT,
+    model = openai ? OPENAI_DEFAULT_MODEL : "jev-latest",
+    inputPrice = openai ? OPENAI_INPUT_PRICE : 0.042,
+    outputPrice = openai ? OPENAI_OUTPUT_PRICE : 0,
     signal = null,
     onUsage = null,
     lenientUsage = false,
@@ -88,16 +116,19 @@ export async function evaluateBrain(state, options = {}) {
   const start = performance.now();
   const prepared = prepareJevRequest(state);
   const requestQuestions = prepared.request.questions;
-  const body = JSON.stringify({ ...prepared.request, model });
+  const body = JSON.stringify(
+    openai ? buildOpenAIBody(prepared, model) : { ...prepared.request, model },
+  );
   const apiCall = Object.keys(requestQuestions).length > 0;
   // The shared TypeSafe endpoint strictly requires a key; self-hosted
   // brains (like the keyless :8009 example) may skip auth entirely.
-  const customBrain = endpoint !== DEFAULT_ENDPOINT;
+  // The Decisions API is always authenticated.
+  const customBrain = !openai && endpoint !== DEFAULT_ENDPOINT;
   let data = { answers: {}, usage: { input_tokens: 0, output_tokens: 0 } };
   if (apiCall) {
-    if (!apiKey && !customBrain) {
+    if (!apiKey && (openai || !customBrain)) {
       const error = new Error(
-        "No API key. Enter one in the frontend first.",
+        `No ${label} API key. Enter one in the frontend first.`,
       );
       error.status = 503;
       throw error;
@@ -114,19 +145,38 @@ export async function evaluateBrain(state, options = {}) {
     if (!res.ok) {
       const error = new Error(
         res.status === 401
-          ? "Jev rejected the API key — please check your key."
+          ? `${label} rejected the API key — please check your key.`
           : res.status === 429
             ? "Rate limit reached. Pausing before retry."
-            : `Brain API returned HTTP ${res.status}.`,
+            : `${label} returned HTTP ${res.status}.`,
       );
       error.status = res.status;
       error.billable = res.status >= 500;
       throw error;
     }
     data = await res.json();
+    if (openai) {
+      // Decisions answers are an array keyed by our question names, with
+      // their own usage spelling — fold both into the shapes Jev returns.
+      const converted = fromOpenAIAnswers(data, requestQuestions);
+      if (converted.refusals.length) {
+        const error = new Error(
+          `OpenAI refused the decision (${converted.refusals.join(", ")}).`,
+        );
+        error.status = 422;
+        error.billable = false;
+        throw error;
+      }
+      data = {
+        ...data,
+        answers: converted.answers,
+        usage: normalizeUsage(data.usage),
+      };
+    }
     // Self-hosted brains may skip usage accounting; default to zeros
     // instead of failing the whole decision when lenient.
     if (
+      !openai &&
       lenientUsage &&
       (!Number.isFinite(data.usage?.input_tokens) ||
         !Number.isFinite(data.usage?.output_tokens))
@@ -142,12 +192,12 @@ export async function evaluateBrain(state, options = {}) {
     !Number.isFinite(data.usage?.input_tokens) ||
     !Number.isFinite(data.usage?.output_tokens)
   )
-    throw new Error("Jev returned an incomplete decision.");
+    throw new Error(`${label} returned an incomplete decision.`);
   if (
     requestQuestions.route &&
     !Object.hasOwn(requestQuestions.route.criteria, a.route?.choice)
   )
-    throw new Error("Jev returned an invalid route choice.");
+    throw new Error(`${label} returned an invalid route choice.`);
   const selected = state.vectors[selection.choice];
   if (
     (selected.collision_imminent ?? selected.collision_predicted) &&
@@ -159,7 +209,7 @@ export async function evaluateBrain(state, options = {}) {
   return {
     model: data.model ?? null,
     brain_model: model,
-    decision_source: apiCall ? "jev" : "only_eligible_action",
+    decision_source: apiCall ? (openai ? "openai" : "jev") : "only_eligible_action",
     request_bytes: apiCall
       ? new TextEncoder().encode(body).length
       : 0,

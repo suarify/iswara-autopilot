@@ -19,6 +19,11 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+        env:
+          # Optional: point the Pages build at the public Jev relay worker.
+          # Set as a repo variable; when empty the build calls api.typesafe.ai
+          # directly (needs our origin allowlisted there).
+          VITE_JEV_ENDPOINT: ${{ vars.VITE_JEV_ENDPOINT }}
       - name: Deploy to gh-pages
         uses: peaceiris/actions-gh-pages@v4
         with:

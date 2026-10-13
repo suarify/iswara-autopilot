@@ -60,7 +60,7 @@ test("missing key on the shared endpoint is a 503, not a fetch", async () => {
   try {
     await assert.rejects(
       () => evaluateBrain(sample, { endpoint: DEFAULT_ENDPOINT }),
-      /No API key/,
+      /No Jev API key/,
     );
     assert.equal(called, false);
   } finally {

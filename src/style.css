@@ -1455,6 +1455,72 @@ body.crashed .world-picker {
 #jev-key-input:focus {
   border-color: #111;
 }
+.key-providers {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin: 4px 0 12px;
+}
+.key-provider {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 10px 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #737985;
+  background: #f7f7f7;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  cursor: pointer;
+}
+.key-provider small {
+  font-size: 10px;
+  font-weight: 500;
+  color: #a3a6ab;
+}
+.key-provider:hover {
+  background: #eff1f4;
+}
+.key-provider.active {
+  background: #ffffff;
+  color: #111;
+  border-color: #111;
+  box-shadow: 0 1px 4px #24272d0c;
+}
+.key-provider.active small {
+  color: #737985;
+}
+.key-model-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+#key-model-input {
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  font-size: 14px;
+  border: 1px solid #d5d9e0;
+  border-radius: 12px;
+  outline: none;
+}
+#key-model-input:focus {
+  border-color: #111;
+}
+#key-model-list-btn {
+  flex: none;
+  white-space: nowrap;
+  border-radius: 10px;
+}
+#key-dialog code {
+  font-size: 12px;
+  background: #f2f3f5;
+  border-radius: 5px;
+  padding: 1px 5px;
+}
 .key-status {
   min-height: 20px;
   margin: 10px 0 0;

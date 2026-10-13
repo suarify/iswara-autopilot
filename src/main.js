@@ -47,7 +47,20 @@ import { THEMES } from "./world.js";
 import { candidateName, decisionControls } from "./planning.js";
 import { clamp, nearestOnPath } from "./math.js";
 import { parseVoiceAlternatives, voiceGrammarSrc, VOICE_COMMANDS } from "./voice.js";
-import { evaluateBrain } from "./jev-client.js";
+import {
+  evaluateBrain,
+  JEV_ENDPOINT,
+  jevModelsUrl,
+} from "./jev-client.js";
+import {
+  OPENAI_ENDPOINT,
+  OPENAI_MODELS_URL,
+  OPENAI_DEFAULT_MODEL,
+  buildOpenAIBody,
+  modelIdsFrom,
+  filterModelIds,
+  isDecisionModel,
+} from "./openai-adapter.js";
 import * as THREE from "three";
 import { HERO_MODELS, loadHeroCar } from "./model-assets.js";
 const icons = {
@@ -142,7 +155,7 @@ $("app").innerHTML = `
 <dialog id="crash-dialog" aria-labelledby="crash-title" aria-describedby="crash-description"><span class="crash-symbol">${icon("x")}</span><span class="eyebrow">DRIVE ENDED</span><h1 id="crash-title">Game over.</h1><p id="crash-description"></p><div class="crash-stats"><div><strong id="crash-speed"></strong><span>km/h at impact</span></div><div><strong id="crash-distance"></strong><span>meters driven</span></div></div><button id="retry-drive" class="primary">${icon("rotate-ccw")} Restart drive</button><button id="crash-new-world" class="secondary">Try a new world ${icon("arrow-up-right")}</button></dialog>
  <dialog id="violations-dialog" aria-labelledby="violations-title"><button id="violations-close" class="dialog-close" aria-label="Close">${icon("x")}</button><span class="eyebrow">SAMAN REPORT</span><h2 id="violations-title">Violations</h2><div id="violations-body"></div><p id="violations-time" class="violations-time"></p><button id="violations-ok" class="primary" style="margin-top:16px">Close</button></dialog>
  <dialog id="credit-dialog" aria-labelledby="credit-title"><span class="eyebrow">THANKS FOR TAKING A DRIVE</span><h2 id="credit-title">That's your free lap.</h2><p>Your $0.25 of Jev play credit has been used. You can keep exploring with manual controls.</p><button id="credit-close" class="primary">Keep driving manually</button><a href="https://standardagents.ai/" target="_blank" rel="noopener noreferrer">Explore Standard Agents ↗</a></dialog>
-<dialog id="key-dialog" aria-labelledby="key-title"><span class="eyebrow">JEV AUTOPILOT KEY</span><h2 id="key-title">Use your own Jev key.</h2><p>Paste a <a href="https://typesafe.ai/" target="_blank" rel="noopener noreferrer">TypeSafe AI</a> key to engage autopilot. It stays in this browser and is only sent to this server with drive requests — never displayed or logged.</p><input id="jev-key-input" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your TypeSafe AI key" aria-label="TypeSafe AI key" /><p id="jev-key-status" class="key-status" aria-live="polite"></p><div class="dialog-actions"><button id="key-save" class="primary">Save key</button><button id="key-test" class="secondary">Test</button><button id="key-clear" class="subtle">Remove</button><button id="key-close" class="subtle">Close</button></div></dialog>
+<dialog id="key-dialog" aria-labelledby="key-title"><span class="eyebrow">AUTOPILOT KEY</span><h2 id="key-title">Use your own key.</h2><p id="key-help">Paste a <a href="https://typesafe.ai/" target="_blank" rel="noopener noreferrer">TypeSafe AI</a> key to engage autopilot. It stays in this browser and is only sent to this server with drive requests — never displayed or logged.</p><div id="key-providers" class="key-providers" role="radiogroup" aria-label="Decision provider"><button type="button" id="key-provider-jev" class="key-provider active" role="radio" aria-checked="true" data-provider="jev">Jev<small>TypeSafe · systemone</small></button><button type="button" id="key-provider-openai" class="key-provider" role="radio" aria-checked="false" data-provider="openai">OpenAI<small>Decisions API</small></button></div><input id="jev-key-input" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your TypeSafe AI key" aria-label="API key" /><div id="key-model-row" class="key-model-row" hidden><input id="key-model-input" list="key-model-list" autocomplete="off" spellcheck="false" placeholder="gpt-6-luna" aria-label="OpenAI model" /><button type="button" id="key-model-list-btn" class="secondary">List models</button><datalist id="key-model-list"></datalist></div><p id="jev-key-status" class="key-status" aria-live="polite"></p><div class="dialog-actions"><button id="key-save" class="primary">Save key</button><button id="key-test" class="secondary">Test</button><button id="key-clear" class="subtle">Remove</button><button id="key-close" class="subtle">Close</button></div></dialog>
 <dialog id="brain-dialog" aria-labelledby="brain-title"><button id="brain-close-x" class="dialog-close" aria-label="Close">${icon("x")}</button><span class="eyebrow">WHO DRIVES</span><h2 id="brain-title">Pick your driver.</h2><p>Jev by default, or point at your own self-hosted brain (Laya, Kev, …) — any http(s) URL. The name shows in the game while it drives.</p><input id="brain-name" autocomplete="off" spellcheck="false" placeholder="Display name — e.g. Laya" aria-label="Driver display name" /><input id="brain-url" autocomplete="off" spellcheck="false" placeholder="Base URL — e.g. http://localhost:8080/v1/drive" aria-label="Driver base URL" /><input id="brain-model" autocomplete="off" spellcheck="false" placeholder="Model name — e.g. laya-v1 (optional)" aria-label="Model name" /><input id="brain-key" type="password" autocomplete="off" spellcheck="false" placeholder="Key for this brain (optional)" aria-label="Brain key" /><label class="brain-direct"><input id="brain-direct" type="checkbox" checked /> Call straight from this browser (no proxy)</label><p id="brain-status" class="key-status" aria-live="polite"></p><div class="dialog-actions"><button id="brain-save" class="primary">Save driver</button><button id="brain-test" class="secondary">Test</button><button id="brain-close" class="subtle">Close</button></div><div id="brain-list" class="brain-list"></div></dialog>
 <div id="toast" role="status" hidden></div>
 <dialog id="json-dialog"><div class="json-header"><div>${icon("braces")}<strong>Under the hood</strong><span id="json-live">LIVE · 4 Hz</span></div><button id="close-json" aria-label="Close JSON inspector">${icon("x")}</button></div><div class="json-toolbar"><div class="json-tabs"><button data-tab="request" class="active">Jev input</button><button data-tab="sensor">Perception</button><button data-tab="world">Full world</button><button data-tab="decision">Response</button><button data-tab="voice">Voice</button></div><div class="json-actions"><button id="freeze-json">Freeze</button><button id="copy-json" aria-label="Copy displayed JSON">${icon("copy")} <span id="copy-json-label" aria-live="polite">Copy</span></button><button id="download-json">${icon("download")} Download</button></div></div><p id="json-description">Exact Jev API payload, including instructions and offered choices. Full geometry and control details stay local.</p><pre id="json-content"></pre></dialog>
@@ -272,39 +285,117 @@ function toast(text, type = "info") {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => ($("toast").hidden = true), 4200);
 }
-// Personal Jev key stored only in this browser (localStorage). It is sent
-// to our own server as the x-jev-key header so local dev needs no .env
-// edit; it is never written into JSON views, costs, or logs.
+// Personal keys stored only in this browser (localStorage). Both keys travel
+// straight from this tab to their own provider — the Jev key to
+// api.typesafe.ai, the OpenAI key to api.openai.com — and never through a
+// server of ours. Neither is written into JSON views, costs or logs.
 const JEV_KEY_STORAGE = "jevpilot.jev_api_key";
-const getJevKey = () => {
-  try {
-    return (localStorage.getItem(JEV_KEY_STORAGE) || "").trim() || null;
-  } catch {
-    return null;
-  }
+const KEY_PROVIDER_STORAGE = "jevpilot.key_provider";
+const OPENAI_KEY_STORAGE = "jevpilot.openai_api_key";
+const OPENAI_MODEL_STORAGE = "jevpilot.openai_model";
+const KEY_PROVIDERS = ["jev", "openai"];
+const store = {
+  get(key) {
+    try {
+      return (localStorage.getItem(key) || "").trim() || null;
+    } catch {
+      return null;
+    }
+  },
+  set(key, value) {
+    try {
+      value ? localStorage.setItem(key, value) : localStorage.removeItem(key);
+      return true;
+    } catch {
+      return false;
+    }
+  },
 };
-const hasJevKey = () => !!getJevKey();
+const getJevKey = () => store.get(JEV_KEY_STORAGE);
+const getKeyProvider = () =>
+  store.get(KEY_PROVIDER_STORAGE) === "openai" ? "openai" : "jev";
+const setKeyProvider = (provider) => store.set(KEY_PROVIDER_STORAGE, provider);
+const getOpenAIKey = () => store.get(OPENAI_KEY_STORAGE);
+const getOpenAIModel = () => store.get(OPENAI_MODEL_STORAGE) || OPENAI_DEFAULT_MODEL;
+// Which decision API the key dialog points at. A custom brain (Who drives)
+// always wins in the decide loop; this profile fills the Jev slot only.
+function decisionProfile() {
+  if (getKeyProvider() === "openai")
+    return {
+      provider: "openai",
+      key: getOpenAIKey(),
+      model: getOpenAIModel(),
+      endpoint: OPENAI_ENDPOINT,
+    };
+  return {
+    provider: "jev",
+    key: getJevKey(),
+    model: null,
+    // Direct TypeSafe URL, or the relay (dev /typesafe/*, or the public
+    // worker on Pages) when VITE_JEV_ENDPOINT is set.
+    endpoint: JEV_ENDPOINT,
+  };
+}
+const hasDecisionKey = () => !!decisionProfile().key;
+const providerName = (provider = decisionProfile().provider) =>
+  provider === "openai" ? "OpenAI" : "Jev";
+function requestPayloadNote() {
+  return decisionProfile().provider === "openai" && !activeBrain()
+    ? "Exact OpenAI Decisions payload — same state and questions, spelled for POST /v1/decisions. Full geometry and control details stay local."
+    : "Exact Jev API payload, including instructions and offered choices. Full geometry and control details stay local.";
+}
+function refreshInspectorNote() {
+  const note = $("json-description");
+  if (note && inspectorTab === "request") note.textContent = requestPayloadNote();
+}
 function refreshKeyButton() {
-  const key = getJevKey(),
+  const profile = decisionProfile(),
     button = $("jev-key");
   if (!button) return;
   button.hidden = authRequired;
   tooltips.set(
     button,
-    key ? `Jev key ····${key.slice(-4)} · tap to change` : "Add your Jev key",
+    profile.key
+      ? profile.provider === "openai"
+        ? `OpenAI · ${profile.model} · ····${profile.key.slice(-4)} · tap to change`
+        : `Jev key ····${profile.key.slice(-4)} · tap to change`
+      : `Add your ${providerName(profile.provider)} key`,
   );
-  button.classList.toggle("key-missing", !key);
+  button.classList.toggle("key-missing", !profile.key);
+  refreshInspectorNote();
+}
+const KEY_HELP = {
+  jev: `Paste a <a href="https://typesafe.ai/" target="_blank" rel="noopener noreferrer">TypeSafe AI</a> key to engage autopilot. It stays in this browser and is only sent to this server with drive requests — never displayed or logged.`,
+  openai: `Drive with the <a href="https://developers.openai.com/api/docs/guides/decisions" target="_blank" rel="noopener noreferrer">OpenAI Decisions API</a> — your <code>sk-…</code> key goes straight to api.openai.com and never through our server. Pick the model, save, then press J.`,
+};
+function paintKeyDialog() {
+  const profile = decisionProfile(),
+    openai = profile.provider === "openai";
+  for (const provider of KEY_PROVIDERS) {
+    const button = $(`key-provider-${provider}`);
+    const active = provider === profile.provider;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-checked", String(active));
+  }
+  $("key-help").innerHTML = KEY_HELP[profile.provider];
+  $("key-model-row").hidden = !openai;
+  if (openai) $("key-model-input").value = getOpenAIModel();
+  $("jev-key-input").value = "";
+  $("jev-key-input").placeholder = profile.key
+    ? `Saved ····${profile.key.slice(-4)} — paste a new ${openai ? "OpenAI " : ""}key to replace`
+    : openai
+      ? "Paste your OpenAI API key (sk-…)"
+      : "Paste your TypeSafe AI key";
+  $("jev-key-status").textContent = profile.key
+    ? `${providerName(profile.provider)} key saved (····${profile.key.slice(-4)}).${openai ? ` Model: ${profile.model}.` : ""}`
+    : openai
+      ? "No OpenAI key saved yet."
+      : "No key saved yet.";
+  $("key-clear").hidden = !profile.key;
+  refreshInspectorNote();
 }
 function openKeyDialog() {
-  const key = getJevKey();
-  $("jev-key-input").value = "";
-  $("jev-key-input").placeholder = key
-    ? `Saved ····${key.slice(-4)} — paste a new key to replace`
-    : "Paste your TypeSafe AI key";
-  $("jev-key-status").textContent = key
-    ? `Key saved in this browser (····${key.slice(-4)}).`
-    : "No key saved yet.";
-  $("key-clear").hidden = !key;
+  paintKeyDialog();
   $("key-dialog").showModal();
   setTimeout(() => $("jev-key-input").focus(), 50);
 }
@@ -331,8 +422,8 @@ function setPilot(on) {
     $("credit-dialog").showModal();
     return;
   }
-  if (on && !configured && !hasJevKey() && !activeBrain()) {
-    toast("Add your Jev key to engage autopilot.", "error");
+  if (on && !configured && !hasDecisionKey() && !activeBrain()) {
+    toast(`Add your ${providerName()} key to engage autopilot.`, "error");
     openKeyDialog();
     return;
   }
@@ -563,8 +654,7 @@ document.querySelectorAll("[data-tab]").forEach(
         .querySelectorAll("[data-tab]")
         .forEach((b) => b.classList.toggle("active", b === button));
       $("json-description").textContent = {
-        request:
-          "Exact Jev API payload, including instructions and offered choices. Full geometry and control details stay local.",
+        request: requestPayloadNote(),
         sensor:
           "Complete forward perception, route guidance, geometry predictions and vehicle telemetry.",
         world:
@@ -584,13 +674,16 @@ $("freeze-json").onclick = () => {
   syncFreeze();
 };
 function inspectRequest(state) {
-  const { request, fixed } = prepareJevRequest(state);
-  return Object.keys(request.questions).length
-    ? request
-    : {
-        status: "No Jev call needed: only one eligible action.",
-        resolved_locally: fixed,
-      };
+  const prepared = prepareJevRequest(state);
+  if (!Object.keys(prepared.request.questions).length)
+    return {
+      status: "No Jev call needed: only one eligible action.",
+      resolved_locally: prepared.fixed,
+    };
+  // Same questions, spelled for whichever provider the key dialog points at.
+  if (!activeBrain() && getKeyProvider() === "openai")
+    return buildOpenAIBody(prepared, getOpenAIModel());
+  return prepared.request;
 }
 function updateCredits(credits) {
   if (!credits) return;
@@ -600,15 +693,38 @@ function updateCredits(credits) {
 $("credit-close").onclick = () => $("credit-dialog").close();
 $("jev-key").onclick = () => openKeyDialog();
 $("key-close").onclick = () => $("key-dialog").close();
+for (const provider of KEY_PROVIDERS)
+  $(`key-provider-${provider}`).onclick = () => {
+    if (getKeyProvider() === provider) return;
+    setKeyProvider(provider);
+    paintKeyDialog();
+    $("jev-key-status").textContent =
+      provider === "openai"
+        ? "OpenAI selected — paste your key and pick the model."
+        : "Jev selected — paste your TypeSafe AI key.";
+  };
 $("key-save").onclick = () => {
-  const value = $("jev-key-input").value.trim();
+  const provider = getKeyProvider(),
+    value = $("jev-key-input").value.trim();
   if (!value) {
     toast("Paste a key first.", "error");
     return;
   }
-  try {
-    localStorage.setItem(JEV_KEY_STORAGE, value);
-  } catch {
+  if (provider === "openai") {
+    const model = ($("key-model-input").value || "").trim() || OPENAI_DEFAULT_MODEL;
+    if (!store.set(OPENAI_KEY_STORAGE, value)) {
+      toast("Could not save the key in this browser.", "error");
+      return;
+    }
+    store.set(OPENAI_MODEL_STORAGE, model);
+    $("jev-key-input").value = "";
+    configured = true;
+    refreshKeyButton();
+    $("key-dialog").close();
+    toast(`OpenAI key saved · ${model}. Press J to engage autopilot.`);
+    return;
+  }
+  if (!store.set(JEV_KEY_STORAGE, value)) {
     toast("Could not save the key in this browser.", "error");
     return;
   }
@@ -619,11 +735,10 @@ $("key-save").onclick = () => {
   toast("Jev key saved. Press J to engage autopilot.");
 };
 $("key-clear").onclick = () => {
-  try {
-    localStorage.removeItem(JEV_KEY_STORAGE);
-  } catch {
-    /* storage unavailable — key already effectively gone */
-  }
+  if (getKeyProvider() === "openai") {
+    store.set(OPENAI_KEY_STORAGE, null);
+    store.set(OPENAI_MODEL_STORAGE, null);
+  } else store.set(JEV_KEY_STORAGE, null);
   refreshKeyButton();
   openKeyDialog();
 };
@@ -1003,7 +1118,12 @@ $("start-drive").onclick = async () => {
   updateUI();
 };
 $("key-test").onclick = async () => {
-  // Validate the typed (or saved) key against TypeSafe without driving.
+  if (getKeyProvider() === "openai") {
+    await listOpenAIModels("Checking with OpenAI…");
+    return;
+  }
+  // Always check the Jev endpoint from this browser — direct by default,
+  // same-origin relay in dev. No server of ours is involved either way.
   const candidate = $("jev-key-input").value.trim() || getJevKey();
   if (!candidate) {
     $("jev-key-status").textContent = "Paste a key first, then Test.";
@@ -1011,24 +1131,65 @@ $("key-test").onclick = async () => {
   }
   $("jev-key-status").textContent = "Checking with TypeSafe…";
   try {
-    const res = await fetch("/api/key-check", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: {
-        "Content-Type": "application/json",
-        "x-jev-key": candidate,
-      },
-      body: "{}",
+    const res = await fetch(jevModelsUrl(), {
+      headers: { Authorization: `Bearer ${candidate}` },
       signal: AbortSignal.timeout(15000),
     });
-    const data = await res.json();
-    $("jev-key-status").textContent = data.ok
-      ? "Key accepted by TypeSafe — save it and press J."
-      : data.error || "Key check failed.";
+    if (res.status === 401 || res.status === 403) {
+      $("jev-key-status").textContent =
+        "TypeSafe rejected that key — check it and try again.";
+      return;
+    }
+    if (!res.ok) {
+      $("jev-key-status").textContent = `TypeSafe answered HTTP ${res.status}.`;
+      return;
+    }
+    $("jev-key-status").textContent =
+      "Key accepted by TypeSafe — save it and press J.";
   } catch {
-    $("jev-key-status").textContent = "Could not reach the server.";
+    $("jev-key-status").textContent =
+      "Could not reach the Jev endpoint — network failure, or this origin is blocked (CORS).";
   }
 };
+$("key-model-list-btn").onclick = () => listOpenAIModels("Listing models…");
+// GET /v1/models doubles as the OpenAI key check: 401 means the key is bad,
+// a 200 fills the model datalist with everything the key can see.
+async function listOpenAIModels(statusPrefix) {
+  const candidate = $("jev-key-input").value.trim() || getOpenAIKey();
+  if (!candidate) {
+    $("jev-key-status").textContent = "Paste a key first, then List models.";
+    return;
+  }
+  $("jev-key-status").textContent = statusPrefix;
+  let ids = null;
+  try {
+    const res = await fetch(OPENAI_MODELS_URL, {
+      headers: { Authorization: `Bearer ${candidate}` },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (res.status === 401 || res.status === 403) {
+      $("jev-key-status").textContent =
+        "OpenAI rejected that key — check it and try again.";
+      return;
+    }
+    if (!res.ok) {
+      $("jev-key-status").textContent = `OpenAI answered HTTP ${res.status}.`;
+      return;
+    }
+    ids = modelIdsFrom(await res.json());
+  } catch {
+    $("jev-key-status").textContent = "Could not reach api.openai.com.";
+    return;
+  }
+  const list = $("key-model-list");
+  list.innerHTML = "";
+  for (const id of filterModelIds(ids, ""))
+    list.append(Object.assign(document.createElement("option"), { value: id }));
+  const decisions = ids.filter(isDecisionModel).length;
+  $("jev-key-status").textContent = ids.length
+    ? `Key accepted — ${ids.length} models listed${decisions ? ` · ${decisions} answer decisions` : ""}. Pick one and Save.`
+    : "Key accepted, but no models came back.";
+}
 // ---- Custom brains: Jev vs Laya vs Kev vs … (localhost only) ----
 const BRAIN_STORAGE = "kancil.brains";
 const BRAIN_ACTIVE_STORAGE = "kancil.brain_active";
@@ -1215,64 +1376,44 @@ $("brain-test").onclick = async () => {
     $("brain-status").textContent = "Enter a base URL first, then Test.";
     return;
   }
-  const direct =
-    $("brain-direct").checked || /^https:\/\//i.test(baseUrl);
-  $("brain-status").textContent = direct ? "Probing direct…" : "Probing…";
-  // Direct brains (required for https tunnels) must be reachable from this
-  // browser with CORS enabled; the proxy probe would 400/mislead instead.
-  if (direct) {
-    try {
-      const res = await fetch(baseUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(key ? { Authorization: `Bearer ${key}` } : {}),
-        },
-        body: "{}",
-        signal: AbortSignal.timeout(15000),
-      });
-      if (res.status === 401) {
-        $("brain-status").textContent =
-          "Endpoint answered but rejected this key (401). Check the key.";
-        return;
-      }
-      $("brain-status").textContent = res.ok
-        ? "Endpoint answered — save it and press J."
-        : `Endpoint answered HTTP ${res.status} — save it and press J.`;
-      return;
-    } catch (e) {
-      if (e instanceof TypeError) {
-        $("brain-status").textContent =
-          "Direct fetch blocked (CORS/network). Enable CORS for this origin on the brain, or uncheck Direct to use the localhost proxy.";
-        return;
-      }
-      $("brain-status").textContent = "Could not reach that endpoint.";
-      return;
-    }
-  }
+  // Always probe the full URL straight from this browser — there is no
+  // local proxy in this build, so an unchecked Direct would just 404.
+  $("brain-status").textContent = "Probing direct…";
   try {
-    const res = await fetch("/api/key-check", {
+    const res = await fetch(baseUrl, {
       method: "POST",
-      credentials: "same-origin",
       headers: {
         "Content-Type": "application/json",
-        "x-jev-endpoint": baseUrl,
-        ...(key ? { "x-jev-key": key } : {}),
+        ...(key ? { Authorization: `Bearer ${key}` } : {}),
       },
       body: "{}",
       signal: AbortSignal.timeout(15000),
     });
-    const data = await res.json();
-    $("brain-status").textContent = data.ok
+    if (res.status === 401 || res.status === 403) {
+      $("brain-status").textContent =
+        "Endpoint answered but rejected this key (401). Check the key.";
+      return;
+    }
+    $("brain-status").textContent = res.ok
       ? "Endpoint answered — save it and press J."
-      : data.error || "Probe failed.";
-  } catch {
-    $("brain-status").textContent = "Could not reach the server.";
+      : `Endpoint answered HTTP ${res.status} — save it and press J.`;
+  } catch (e) {
+    if (e instanceof TypeError) {
+      $("brain-status").textContent =
+        "Could not reach that URL — network failure or CORS blocked for this origin.";
+      return;
+    }
+    $("brain-status").textContent = "Could not reach that endpoint.";
   }
 };
 $("sign-out").onclick = async () => {
   setPilot(false);
   sim.paused = true;
+  if (!authRequired) {
+    // Static build: no server, so no session to end.
+    $("sign-out").hidden = true;
+    return;
+  }
   try {
     const response = await fetch("/api/auth/logout", {
       method: "POST",
@@ -1432,107 +1573,40 @@ async function decide() {
     scene.vectors.setCandidates(plan);
     lastInput = inspectRequest(state);
     const brain = activeBrain(),
-      brainKey = brain?.key || getJevKey();
-    let data = null,
-      res = null;
-    // Pure-client path: call the brain straight from this browser, no
-    // proxy involved. Falls back to the server proxy on network/CORS
-    // failure; other errors (bad key, bad payload) surface directly.
-    if (brain?.direct) {
-      try {
-        data = await evaluateBrain(state, {
-          apiKey: brainKey,
-          endpoint: brain.baseUrl,
-          model: brain.model || brain.name,
-          lenientUsage: true,
-          signal: AbortSignal.timeout(12000),
-        });
-        data.direct = true;
-      } catch (error) {
-        if (error instanceof TypeError) {
-          toast("Direct brain unreachable — using server proxy.", "error");
-        } else throw error;
-      }
-    }
-    if (!data) {
-      try {
-        res = await fetch("/api/decide", {
-          method: "POST",
-          credentials: "same-origin",
-          headers: {
-            "Content-Type": "application/json",
-            ...(brainKey ? { "x-jev-key": brainKey } : {}),
-            ...(brain
-              ? {
-                  "x-jev-endpoint": brain.baseUrl,
-                  "x-jev-model": brain.model || brain.name,
-                }
-              : {}),
-          },
-          body: JSON.stringify({ state, request_id: crypto.randomUUID() }),
-          signal: AbortSignal.timeout(12000),
-        });
-        data = await res.json();
-        // Static hosting returns 404 for /api/* — fall back to direct browser call.
-        if (!res.ok && res.status === 404 && !authRequired) {
-          if (!(brainKey || getJevKey()) && !brain) throw new Error("No key for direct brain call.");
-          toast("No server — calling Jev directly from this browser.", "error");
-          data = await evaluateBrain(state, {
-            apiKey: brainKey || getJevKey(),
-            endpoint: brain?.baseUrl || "https://api.typesafe.ai/v1/systemone",
-            model: brain?.model || brain?.name || "jev-latest",
-            lenientUsage: true,
-            signal: AbortSignal.timeout(12000),
-          });
-          data.direct = true;
-          res = null;
-        }
-      } catch (error) {
-        // Network failure on static host (or proxy unreachable) — try direct.
-        if (
-          error instanceof TypeError &&
-          !authRequired &&
-          (brainKey || getJevKey() || brain)
-        ) {
-          toast("Server unreachable — trying direct brain from this browser.", "error");
-          data = await evaluateBrain(state, {
-            apiKey: brainKey || getJevKey(),
-            endpoint: brain?.baseUrl || "https://api.typesafe.ai/v1/systemone",
-            model: brain?.model || brain?.name || "jev-latest",
-            lenientUsage: true,
-            signal: AbortSignal.timeout(12000),
-          });
-          data.direct = true;
-          res = null;
-        } else throw error;
-      }
+      profile = decisionProfile(),
+      // A custom brain (Who drives) keeps its own key and model; otherwise
+      // the key dialog's profile — Jev or OpenAI — decides where this goes.
+      target = brain
+        ? {
+            apiKey:
+              brain.key || (profile.provider === "jev" ? profile.key : null),
+            endpoint: brain.baseUrl,
+            model: brain.model || brain.name,
+          }
+        : {
+            apiKey: profile.key,
+            endpoint: profile.endpoint,
+            model: profile.model || "jev-latest",
+            provider: profile.provider,
+          };
+    // This build ships no server: every decision posts from this browser to
+    // the configured endpoint — direct TypeSafe, the dev relay, OpenAI's
+    // /v1/decisions, or a brain URL — never to a relative /api/* path, which
+    // always 404s.
+    let data;
+    try {
+      data = await evaluateBrain(state, {
+        ...target,
+        lenientUsage: true,
+        signal: AbortSignal.timeout(12000),
+      });
+      data.direct = true;
+    } catch (error) {
+      if (error instanceof TypeError)
+        throw new Error(`Could not reach ${target.endpoint} (blocked or offline).`);
+      throw error;
     }
     updateCredits(data.credits);
-    if (res) {
-      if (res.status === 401 && authRequired) {
-        setPilot(false);
-        location.assign("/login");
-        return;
-      }
-      if (res.status === 402 && authRequired) {
-        setPilot(false);
-        $("credit-dialog").showModal();
-        return;
-      }
-      if (res.status === 503 && !authRequired && !hasJevKey()) {
-        setPilot(false);
-        toast(data.error || "Add your Jev key to drive with autopilot.", "error");
-        openKeyDialog();
-        return;
-      }
-      if (res.status === 401 && !authRequired && hasJevKey()) {
-        setPilot(false);
-        toast("Jev rejected the saved key. Check it and try again.", "error");
-        openKeyDialog();
-        return;
-      }
-      if (!res.ok) throw Error(data.error || "Jev request failed");
-    }
     if (data.decision_source === "only_eligible_action")
       tally.constrained_steps++;
     else tally.calls++;
@@ -1606,7 +1680,11 @@ async function decide() {
       nextDecision = performance.now() + Math.min(15000, 1000 * 2 ** errors);
       toast(error.message, "error");
       sim.event(error.message, "error");
-      if (errors >= 3) {
+      if ((error.status === 503 && !authRequired) || error.status === 401) {
+        // A missing or rejected key is a settings problem, not a failing service.
+        setPilot(false);
+        openKeyDialog();
+      } else if (errors >= 3) {
         setPilot(false);
         toast(
           "Jev paused after three failed requests. Toggle autopilot to reconnect.",
@@ -1969,7 +2047,13 @@ requestAnimationFrame(animate);
 finishLoading().catch(loadingFailed);
 setInterval(decide, 25);
 fetch("/api/status", { credentials: "same-origin" })
-  .then((r) => r.json())
+  .then(async (r) => {
+    // Static hosts answer /api/* with HTML or 404 — only a JSON body means a
+    // real server sits in front of this build.
+    if (!r.ok || !(r.headers.get("content-type") || "").includes("json"))
+      throw new Error("No server");
+    return r.json();
+  })
   .then((data) => {
     authRequired = data.auth_required !== false;
     if (authRequired && data.authenticated !== true) {
@@ -1979,12 +2063,12 @@ fetch("/api/status", { credentials: "same-origin" })
     updateCredits(data.credits);
     $("sign-out").hidden = !data.authenticated;
     if (data.user) tooltips.set($("sign-out"), `Sign out · ${data.user.email}`);
-    configured = data.configured || (!authRequired && hasJevKey());
+    configured = data.configured || (!authRequired && hasDecisionKey());
     refreshKeyButton();
     refreshBrainButton();
     updateCostTooltip(data.pricing);
     if (!configured && !authRequired) {
-      toast("Add your Jev key (key button) or set it on the server.", "error");
+      toast("Add your key (key button) or set it on the server.", "error");
       openKeyDialog();
     } else if (!configured)
       toast("Jev API key is missing. Check the server configuration.", "error");
@@ -1992,14 +2076,14 @@ fetch("/api/status", { credentials: "same-origin" })
   .catch(() => {
     // Static hosting: no /api/* . Switch to fully client-side mode.
     authRequired = false;
-    configured = hasJevKey() || !!activeBrain();
+    configured = hasDecisionKey() || !!activeBrain();
     const so = $("sign-out");
     if (so) so.hidden = true;
     refreshKeyButton();
     refreshBrainButton();
     updateCostTooltip({ input_per_million: 0.042, output_per_million: 0 });
     toast(
-      "Static mode: manual driving is ready. Add your Jev key or a direct brain URL to enable autopilot with no server.",
+      "Static mode: manual driving is ready. Add a Jev or OpenAI key (key button) or a direct brain URL to enable autopilot with no server.",
     );
   });
 
