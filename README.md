@@ -1,8 +1,8 @@
 # Iswara Autopilot
 
-**Play now:** [GH Pages — suarify.github.io/iswara-autopilot](https://suarify.github.io/iswara-autopilot/)
+<video src="https://suarify.github.io/iswara-autopilot/compressed.mp4" controls preload="metadata" width="100%"></video>
 
-**Demo:** [▶ Watch `docs/compressed.mp4` (24&nbsp;MB)](docs/compressed.mp4) — opens in GitHub's file player.
+**Play now:** [GH Pages — suarify.github.io/iswara-autopilot](https://suarify.github.io/iswara-autopilot/)
 
 Malaysian street-driving playground — pure frontend, no server. Take the wheel of the **Proton Iswara** (default hero) or ten more local heroes — Kancil, Wira, Myvi Red/Yellow/White, Satria, Bezza, Kancil Red, Tank, Tesla — on a night city circuit with traffic, signals, stop lines and a checkered finish.
 
