@@ -1,25 +1,37 @@
-# Iswara Pilot — JevPilot fork (Pure Frontend)
+# Iswara Autopilot
 
-https://github.com/user-attachments/assets/4baef58e-54ef-4d17-9982-353a0b6e6f45
+<video src="https://github.com/suarify/iswara-autopilot/releases/download/demo/iswara.mp4" controls preload="metadata" width="100%"></video>
 
-<p align="center">
-  <a href="https://jevpilot.standardagents.ai">
-    <img src="docs/try-jevpilot.svg" alt="Try JevPilot →" width="256" height="64" />
-  </a>
-</p>
+**Play now:** [GH Pages — suarify.github.io/iswara-autopilot](https://suarify.github.io/iswara-autopilot/) · [here.now — rustic-breeze-p5bt](https://rustic-breeze-p5bt.here.now/)
 
-**Play now:** [GH Pages — suarify.github.io/iswara-autopilot](https://suarify.github.io/iswara-autopilot/) · [here.now — rustic-breeze-p5bt](https://rustic-breeze-p5bt.here.now/) · Upstream [jevpilot.standardagents.ai](https://jevpilot.standardagents.ai)
+> **Demo video:** `iswara.mp4` (188&nbsp;MB) is too big for git — publish it once as a release asset and the player above starts working, no code change needed: repo → **Releases** → **Draft a new release** → tag `demo` → attach `iswara.mp4` → **Publish**.
 
-> **Self-host brains (Kev / Laya):** local Jev alternatives at **[suarify/jev-kev-laya-selfhost](https://github.com/suarify/jev-kev-laya-selfhost)** — run `http://localhost:8080/v1/drive` (or your tunnel) and paste the URL in **Pick your driver** with **Call straight from this browser** checked. See that repo for Docker, CORS and model weights.
+Malaysian street-driving playground — pure frontend, no server. Take the wheel of the **Proton Iswara** (default hero) or ten more local heroes — Kancil, Wira, Myvi Red/Yellow/White, Satria, Bezza, Kancil Red, Tank, Tesla — on a night city circuit with traffic, signals, stop lines and a checkered finish.
 
-Pure frontend driving playground — no server. Manual driving, Myvi/Wira/Tesla/Satria chase, race timer, finish gate, and optional autopilot (**Jev** or **OpenAI Decisions**) called straight from the browser tab.
+**MYVI GANG pursuit:** a pack of chasers hunts you down. The banner shows the live gap — under 20&nbsp;m it's sequence survival: fastest forward vector plus a lane offset to break contact. Three strikes (missed stops, red lights, violations) and the violations dialog ends the run.
+
+Manual driving, race timer, touch controls on mobile, and optional autopilot (**Jev** or **OpenAI Decisions**) called straight from the browser tab with your own key.
+
+## Controls
+
+| Input | Action |
+| --- | --- |
+| `W` / `↑` | Throttle |
+| `S` / `↓` | Brake / reverse |
+| `A` `D` / `←` `→` | Steer |
+| `Space` | Brake |
+| `J` | Autopilot on/off |
+| `C` | Camera view |
+| `P` | Pause |
+
+Touch pedals + steering on mobile. **Start drive** launches the run; the **key** icon opens the autopilot key dialog.
 
 ## Quick start (static)
 
 ```sh
 npm ci
 npm run dev      # http://localhost:5173
-npm test         # node --test tests/*.test.js
+npm test         # per-file runs, see Tests below
 # build for any static host
 npm run build    # -> dist/
 npx serve dist -l 5000
@@ -52,12 +64,10 @@ The **key** icon opens **Use your own key.** (`src/main.js:158`) with a provider
 ## Tests
 
 ```sh
-npm test   # node --test tests/*.test.js
+node --test tests/jev-client.test.js tests/openai-adapter.test.js
 ```
 
-> Note: the full run currently stalls inside `tests/simulation.test.js` (pre-existing hang in world-sim code, unrelated to autopilot). Run files individually instead, e.g. `node --test tests/jev-client.test.js tests/openai-adapter.test.js`.
-
-Covers world generation, physics, collisions, chase/traffic behaviour, road recovery, voice commands, and both provider layers — `tests/jev-client.test.js` and `tests/openai-adapter.test.js` (Jev ↔ OpenAI request/response translation).
+> Note: the full `npm test` run currently stalls inside `tests/simulation.test.js` (pre-existing hang in world-sim code, unrelated to autopilot). Run files individually instead.
 
 Known red, all pre-existing and outside the autopilot path: 10 assertions in `chase` (2) / `simulation` (4) / `traffic-safety` (3) / `road-recovery` (1) that predate the current world build. The old `server/` test files (`auth`, `jev`) were removed with the server itself.
 
@@ -84,4 +94,4 @@ Asset credits in `public/`.
 
 Original **JevPilot** by [StandardAgents](https://github.com/standardagents/jevpilot) (https://jevpilot.standardagents.ai) — Tesla Autopilot-like demo using [Jev by TypeSafe AI](https://typesafe.ai/). Upstream MIT-style assets, traffic GLB fleet and world simulation by the original authors.
 
-This fork **Iswara Pilot** (`suarify/iswara-autopilot`) is a pure-frontend static adaptation maintained by **Suarify** — adds the `Satria` hero/traffic car (`public/models/model-y/satria.glb`), race timer + checkered finish, the 3-violations dialog, the 2-line `MYVI GANG` banner, browser-direct Jev (`src/jev-client.js:81`), and the **OpenAI Decisions** provider (`src/openai-adapter.js`). Original credits preserved; upstream remains at `standardagents/jevpilot`.
+This fork **Iswara Autopilot** (`suarify/iswara-autopilot`) is a pure-frontend static adaptation maintained by **Suarify** — adds the Malaysian hero/traffic fleet (`iswara`, `satria` and the Myvi/Wira/Bezza/Kancil gang in `public/models/model-y/`), race timer + checkered finish, the 3-violations dialog, the 2-line `MYVI GANG` pursuit banner, browser-direct Jev (`src/jev-client.js:96`), and the **OpenAI Decisions** provider (`src/openai-adapter.js`). Original credits preserved; upstream remains at `standardagents/jevpilot`.

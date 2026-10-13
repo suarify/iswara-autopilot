@@ -1,5 +1,7 @@
 node_modules/
 dist/
+# Demo videos live on GitHub Releases (100MB push cap) — never commit .mp4.
+*.mp4
 .env*
 !.env.example
 .reference/
